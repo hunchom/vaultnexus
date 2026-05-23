@@ -43,8 +43,8 @@ White space, verified against the 2026 landscape: (a) frontier semantic retrieva
 | Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
 | Language | **TypeScript** | — |
 | Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
-| Embeddings | **Nomic Atlas API** (`nomic-embed-text-v1.5`, 768-dim, `task_type` prefix) — **API only, no local embedding model** | per user 2026-05-23: no non-API embedding LLM. Ollama-local + bge-m3 dropped |
-| Sentinel cull | **embedding-similarity** (Nomic API) → Judge | local DeBERTa NLI — dropped (API-only ML; kills the ONNX risk + transformers.js/onnxruntime) |
+| Embeddings | **Pluggable provider registry** (per user 2026-05-23): API/endpoint models, swappable — Nomic family (`nomic-embed-text-v1.5`, `v2-moe`), **Google `gemini-embedding-001`**, **EmbeddingGemma**, Voyage-4, OpenAI-3, Cohere/Jina, + a **generic OpenAI-compatible** adapter. **Dims are model-driven** (set from the active model's descriptor; vec0 sized at index time). Default TBD by eval. | hardcoding one model; in-renderer/local models that slow Obsidian (→ daemon) |
+| Sentinel cull | **embedding-similarity** (active embed provider) → Judge | local NLI model — dropped (API-only ML; kills the ONNX risk + transformers.js/onnxruntime) |
 | Reranker | **Voyage rerank-2.5 always** (assume API reachable, even in local-first mode) | local cross-encoder — dropped per user; Voyage assumed available at runtime |
 | Sentinel judge | **`Judge` interface**: tool-result-as-judge (default, zero-key) / direct-API / local-LLM | **MCP `sampling`** — dead in Claude Code/Desktop, deprecated protocol-wide |
 | First-run config | **config file** (+ plugin settings UI later) | **MCP `elicitation`** — unsupported in flagship clients |
@@ -67,13 +67,30 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 │   │              claim table, content-hash cache. Single .db file per vault.
 │   ├── providers/ Nomic Atlas API embeddings; Voyage rerank-2.5 API;
 │   │              tool-result Judge. NO local ML models (no Ollama/ONNX).
-│   ├── server/    stdio MCP server (tools, resources, instructions)
+│   ├── engine/    the DAEMON: HTTP(localhost)+Unix-socket server, FS watcher,
+│   │              single-writer index, all stages. Bears 100% of the CPU.
+│   ├── server/    MCP surface (tools/resources/instructions) over the daemon
+│   ├── shim/      thin stdio-MCP proxy → daemon (for Claude Code)
 │   └── index/     FS walk + chunker + parser + chokidar watcher + hash-cache
+├── clients/
+│   └── obsidian/  THIN Obsidian plugin: UI + HTTP calls only, ZERO compute
 ├── docs/specs/    this document
 └── (README, LICENSE-MIT, .gitignore, pnpm-workspace.yaml, MCPB manifest)
 ```
 
-`core` stays I/O-free and unit-testable; all file/network/persistence is injected through interfaces. This keeps the door open to a future plugin (a second `VaultReader`/`LinkGraphSource` impl) without a rewrite — but we do NOT split packages until that second consumer exists.
+### Process model: standalone engine daemon + thin clients (fixes the Smart Connections slowdown)
+
+**The #1 Smart Connections problem: it embeds/indexes *inside Obsidian's renderer* → freezes the app.** VaultNexus inverts this: **one long-running engine daemon owns all compute; every UI is a thin client.**
+
+- **`vaultnexus` engine (daemon)** — a standalone Node process. Watches the vault on the filesystem, owns the single SQLite index (single writer → no concurrent-writer corruption), runs parse/chunk/embed-calls/hybrid-search/Sentinel/git. **All CPU lives here, in its own process — never in Obsidian.** Embeddings + rerank are API calls (Nomic/Voyage), so even this process is mostly I/O-bound; the only real CPU is sqlite-vec brute-force search + parsing.
+- **IPC: Unix domain socket by default** (no network surface → no DNS-rebinding risk, filesystem-permission-gated), **loopback HTTP optional** (for HTTP-MCP clients) with the hardening in §8.
+- **Clients are thin:**
+  - **Claude Code** → `shim/` (a tiny stdio-MCP proxy that forwards to the daemon socket). Claude Code sees a normal stdio MCP server; the work happens in the daemon.
+  - **Obsidian** → `clients/obsidian/` thin plugin: renders results, sends queries/edits over HTTP/socket. **Zero embedding/indexing/search in the renderer** — Obsidian stays fast no matter how big the vault.
+  - Claude Desktop / Cursor → HTTP-MCP to the same daemon.
+- **Single source of truth + single writer:** because exactly one daemon touches the index, the lockfile/concurrency problem disappears by construction. The daemon is the only writer; clients only read/request.
+
+`core` stays I/O-free and unit-testable; all file/network/persistence is injected through interfaces. The daemon composes them; the shims/plugin are dumb transports.
 
 ### Data stores (single SQLite file per vault)
 - **sqlite-vec** — chunk embeddings (ANN; int8/Matryoshka to control size).

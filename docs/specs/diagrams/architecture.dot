@@ -1,0 +1,67 @@
+digraph VaultNexus {
+  rankdir=TB;
+  bgcolor="white";
+  compound=true;
+  nodesep=0.35; ranksep=0.6;
+  node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", penwidth=1.1, color="#888888", fillcolor="#ffffff"];
+  edge  [fontname="Helvetica", fontsize=9, color="#555555"];
+  graph [fontname="Helvetica-Bold", fontsize=13, labeljust="l", margin=12];
+
+  /* ---------------- THIN CLIENTS ---------------- */
+  subgraph cluster_clients {
+    label="THIN CLIENTS  —  UI + transport only · zero embedding / indexing / search";
+    style="rounded,filled"; color="#9cc7f0"; fillcolor="#eaf4ff"; fontcolor="#0b4a82";
+    cc    [label="Claude Code\n(stdio shim → daemon)"];
+    obs   [label="Obsidian\nTHIN plugin (HTTP / socket)\nstays at 60 fps"];
+    other [label="Claude Desktop / Cursor\n(HTTP-MCP)"];
+  }
+
+  ipc [label="IPC  —  Unix domain socket (default, no network surface)\nor loopback HTTP-MCP (hardened: bearer token + Origin allowlist)",
+       shape=note, fillcolor="#fff7d6", color="#e0c200", fontsize=10];
+
+  /* ---------------- ENGINE DAEMON ---------------- */
+  subgraph cluster_engine {
+    label="VAULTNEXUS ENGINE  (standalone daemon)  —  100% of CPU · SINGLE WRITER";
+    style="rounded,filled"; color="#74c98c"; fillcolor="#e9fbef"; fontcolor="#0d5a2a";
+    mcp   [label="MCP surface\ntools · resources · instructions", fillcolor="#f2fff6"];
+    idx   [label="Indexer\nwatch → parse → chunk →\nembed → Claim Index", fillcolor="#f2fff6"];
+    ret   [label="Retriever\nhybrid RRF → graph expand →\nrerank → cited hits", fillcolor="#f2fff6"];
+    sen   [label="Sentinel\nsimilarity cull → assertion filter →\nJudge → temporal reframe → learn", fillcolor="#f2fff6"];
+    store [label="SQLite  (single .db)\nsqlite-vec · FTS5 · links ·\nclaims · labels · hash-cache",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+  }
+
+  /* ---------------- EXTERNAL APIs ---------------- */
+  subgraph cluster_ext {
+    label="EXTERNAL APIs  (no local models)";
+    style="rounded,filled"; color="#f0a875"; fillcolor="#fff1e8"; fontcolor="#9a4a16";
+    emb   [label="Embedding registry  (pluggable)\nNomic · Gemini · EmbeddingGemma ·\nVoyage · OpenAI · generic OpenAI-compat", fillcolor="#fff8f2"];
+    rr    [label="Voyage rerank-2.5", fillcolor="#fff8f2"];
+    judge [label="Host LLM = Judge\n(tool-result, zero extra key)", fillcolor="#fff8f2"];
+  }
+
+  /* ---------------- VAULT ---------------- */
+  subgraph cluster_vault {
+    label="VAULT  (local · your data)";
+    style="rounded,filled"; color="#b5b5b5"; fillcolor="#f2f2f2"; fontcolor="#333333";
+    md  [label="*.md  (markdown)", shape=folder];
+    git [label="git history\n(belief-drift)", shape=folder];
+  }
+
+  /* ---------------- EDGES ---------------- */
+  cc -> ipc; obs -> ipc; other -> ipc;
+  ipc -> mcp [lhead=cluster_engine];
+  mcp -> idx; mcp -> ret; mcp -> sen;
+  idx -> store; ret -> store [dir=both]; sen -> store [dir=both];
+
+  idx -> emb   [label="embed(doc)"];
+  ret -> emb   [label="embed(query)"];
+  ret -> rr    [label="top-30"];
+  sen -> emb   [label="similarity"];
+  sen -> judge [label="adjudicate"];
+
+  md  -> idx [label="chokidar watch", style=dashed];
+  git -> sen [label="log -G / show", style=dashed];
+  sen -> md  [label="FS-atomic write\n(temp+fsync+rename)", style=dashed];
+  obs -> md  [label="user edits", style=dashed, constraint=false];
+}
