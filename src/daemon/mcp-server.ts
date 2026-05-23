@@ -28,6 +28,18 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         return { content: [{ type: 'text', text: JSON.stringify(hits) }] };
       },
     );
+
+    server.registerTool(
+      'vaultnexus_bridges',
+      {
+        description: 'Surface chunk pairs that are semantically similar but in different notes (hidden connections). Suggestions, not assertions.',
+        inputSchema: { topN: z.number().int().positive().optional(), minSimilarity: z.number().optional() },
+      },
+      async ({ topN, minSimilarity }) => {
+        const bridges = index.bridges(topN ?? 20, minSimilarity ?? 0.5);
+        return { content: [{ type: 'text', text: JSON.stringify(bridges) }] };
+      },
+    );
   }
   return server;
 }
