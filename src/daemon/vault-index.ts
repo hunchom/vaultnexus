@@ -6,6 +6,7 @@ import { search } from '../core/search.js';
 import { FtsIndex } from './fts.js';
 import { fuseRRF } from '../core/fusion.js';
 import { extractWikilinks } from '../core/wikilinks.js';
+import { buildNoteGraph, detectCommunities, resolveLink } from './note-graph.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -19,7 +20,7 @@ export interface SearchHit extends IndexedChunk {
   score: number;
 }
 
-export interface Bridge { a: IndexedChunk; b: IndexedChunk; similarity: number; }
+export interface Bridge { a: IndexedChunk; b: IndexedChunk; similarity: number; crossCommunity: boolean; linked: boolean; }
 
 /** In-memory semantic index over note block-chunks. Cosine via unit-norm vectors. */
 export class VaultIndex {
@@ -74,19 +75,33 @@ export class VaultIndex {
   }
 
   /** Cross-note high-similarity chunk pairs ("notes that secretly agree"), top-N descending. FP-safe. */
-  bridges(topN = 20, minSimilarity = 0.5): Bridge[] {
+  bridges(topN = 20, minSimilarity = 0.5, crossCommunityOnly = false): Bridge[] {
     const n = this.chunks.length;
     if (n < 2) return [];
     if (!this.flatInt8) this.build();
     const f = this.flatF32!;
     const d = this.dims;
+    const notes = this.noteList();
+    const comm = detectCommunities(buildNoteGraph(notes));
+    const paths = notes.map((nt) => nt.path);
+    const key = (p: string, q: string) => (p < q ? `${p} ${q}` : `${q} ${p}`);
+    const linkedPairs = new Set<string>();
+    for (const nt of notes) for (const l of nt.links) {
+      const t = resolveLink(l, paths);
+      if (t && t !== nt.path) linkedPairs.add(key(nt.path, t));
+    }
     const out: Bridge[] = [];
     for (let i = 0; i < n; i++) {
       const vi = f.subarray(i * d, (i + 1) * d);
       for (let j = i + 1; j < n; j++) {
         if (this.chunks[i].notePath === this.chunks[j].notePath) continue;
         const s = dotF32(vi, f.subarray(j * d, (j + 1) * d));
-        if (s >= minSimilarity) out.push({ a: this.chunks[i], b: this.chunks[j], similarity: s });
+        if (s >= minSimilarity) {
+          const aP = this.chunks[i].notePath, bP = this.chunks[j].notePath;
+          const crossCommunity = comm.get(aP) !== comm.get(bP);
+          if (crossCommunityOnly && !crossCommunity) continue;
+          out.push({ a: this.chunks[i], b: this.chunks[j], similarity: s, crossCommunity, linked: linkedPairs.has(key(aP, bP)) });
+        }
       }
     }
     out.sort((x, y) => y.similarity - x.similarity);
