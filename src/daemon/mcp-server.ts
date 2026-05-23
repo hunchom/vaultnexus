@@ -1,8 +1,12 @@
+import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { health } from '../core/health.js';
+import type { VaultIndex } from './vault-index.js';
 
-/** Build the VaultNexus MCP server. Plan 01 ships only the ping probe. */
-export function createMcpServer(): McpServer {
+export interface McpServerDeps { index?: VaultIndex; }
+
+/** Build the VaultNexus MCP server. ping always; search when an index is injected. */
+export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   const server = new McpServer({ name: 'vaultnexus', version: health().version });
 
   server.registerTool(
@@ -11,5 +15,19 @@ export function createMcpServer(): McpServer {
     async () => ({ content: [{ type: 'text', text: JSON.stringify(health()) }] }),
   );
 
+  const index = deps.index;
+  if (index) {
+    server.registerTool(
+      'vaultnexus_search',
+      {
+        description: 'Semantic search over the vault. Returns cited block hits (notePath, headingPath, byte offsets, score).',
+        inputSchema: { query: z.string(), k: z.number().int().positive().optional() },
+      },
+      async ({ query, k }) => {
+        const hits = await index.query(query, k ?? 10);
+        return { content: [{ type: 'text', text: JSON.stringify(hits) }] };
+      },
+    );
+  }
   return server;
 }
