@@ -32,11 +32,11 @@ digraph VaultNexus {
 
   /* ---- EXTERNAL APIs (below engine) ---- */
   subgraph cluster_ext {
-    label="EXTERNAL APIs  ·  no local models";
+    label="PROVIDER REGISTRY  ·  any vendor · local OR API · bring-what-you-have";
     style="rounded,filled"; color="#f0a875"; fillcolor="#fff1e8"; fontcolor="#9a4a16";
-    emb   [label="Embedding registry\nGemini·Nomic·Gemma·\nVoyage·OpenAI·…", fillcolor="#fff8f2"];
-    rr    [label="Rerank\nVoyage 2.5 / zerank-2", fillcolor="#fff8f2"];
-    judge [label="Judge = host LLM\ntool-result · 0 key", fillcolor="#fff8f2"];
+    emb   [label="1. Embedding model\n(required)\nGemini·Nomic·Gemma·local…", fillcolor="#fff8f2"];
+    rr    [label="2. Reranker\n(optional → skip)\nVoyage·Cohere·zerank…", fillcolor="#fff8f2"];
+    judge [label="3. LLM / Judge\n(host session or yours)\nClaude·GPT·Gemini·local", fillcolor="#fff8f2"];
     {rank=same; emb; rr; judge;}
   }
 

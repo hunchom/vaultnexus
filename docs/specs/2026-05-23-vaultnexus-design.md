@@ -43,10 +43,11 @@ White space, verified against the 2026 landscape: (a) frontier semantic retrieva
 | Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
 | Language | **TypeScript** | — |
 | Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
-| Embeddings | **Pluggable provider registry** (per user 2026-05-23): API/endpoint models, swappable — Nomic family (`nomic-embed-text-v1.5`, `v2-moe`), **Google `gemini-embedding-001`**, **EmbeddingGemma**, Voyage-4, OpenAI-3, Cohere/Jina, + a **generic OpenAI-compatible** adapter. **Dims are model-driven** (set from the active model's descriptor; vec0 sized at index time). Default TBD by eval. | hardcoding one model; in-renderer/local models that slow Obsidian (→ daemon) |
-| Sentinel cull | **embedding-similarity** (active embed provider) → Judge | local NLI model — dropped (API-only ML; kills the ONNX risk + transformers.js/onnxruntime) |
-| Reranker | **Voyage rerank-2.5 always** (assume API reachable, even in local-first mode) | local cross-encoder — dropped per user; Voyage assumed available at runtime |
-| Sentinel judge | **`Judge` interface**: tool-result-as-judge (default, zero-key) / direct-API / local-LLM | **MCP `sampling`** — dead in Claude Code/Desktop, deprecated protocol-wide |
+| **Provider registry** (one layer, 3 roles) | **Bring-what-you-have, any vendor, local OR API, multiples allowed** (user 2026-05-23). User registers their providers/models once; VaultNexus assigns each to a **role — embed / rerank / judge** — and a **recommendation engine** suggests the best assignment from what's available. **Local is fine — it runs in the daemon, not Obsidian** (so no SC freeze). Nothing pinned to one vendor. | hardcoding OpenAI; pinning rerank/judge; requiring a rerank or a specific host LLM |
+| ↳ embed role | any embedder in the registry (Gemini / Nomic / EmbeddingGemma / Voyage / OpenAI / Cohere / Jina / **local via Ollama/LM-Studio/TEI** / generic OpenAI-compat). **Dims model-driven** (vec0 sized at index time). | — |
+| ↳ rerank role | **OPTIONAL** — any reranker the user has (Voyage / Cohere / Jina / zerank / local), else **graceful skip** (hybrid+expansion only). Never required. | making rerank mandatory |
+| ↳ judge role | **any chat LLM the user has** — the host session (tool-result-as-judge, zero-key default) **or** any configured LLM (Claude/GPT/Gemini/local). Not pinned. | pinning the judge to one model; relying on MCP `sampling` (dead) |
+| Sentinel cull | **embedding-similarity** (whatever embedder is in the embed role) → Judge | local NLI model dropped (the cull rides the embed provider) |
 | First-run config | **config file** (+ plugin settings UI later) | **MCP `elicitation`** — unsupported in flagship clients |
 | Graph | wikilinks as free structure; **bounded 1-hop expansion** via SQL CTE | HippoRAG PPR + global PageRank — hub-bias on sparse vaults, hurts single-hop QA |
 | Temporal | **git history + mtime + frontmatter dates** | Graphiti bi-temporal LLM fact graph — contradicts thesis, drifts, costly |
@@ -65,8 +66,8 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 │   │               VaultReader, VaultWriter, LinkGraphSource)
 │   ├── store/     SQLite (sqlite-vec + FTS5): chunk vectors, BM25, link table,
 │   │              claim table, content-hash cache. Single .db file per vault.
-│   ├── providers/ Nomic Atlas API embeddings; Voyage rerank-2.5 API;
-│   │              tool-result Judge. NO local ML models (no Ollama/ONNX).
+│   ├── providers/ PROVIDER REGISTRY — roles {embed, rerank?, judge};
+│   │              any vendor, local-or-API; recommend-by-availability engine
 │   ├── engine/    the DAEMON: HTTP(localhost)+Unix-socket server, FS watcher,
 │   │              single-writer index, all stages. Bears 100% of the CPU.
 │   ├── server/    MCP surface (tools/resources/instructions) over the daemon
@@ -92,6 +93,21 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 - **Single source of truth + single writer:** because exactly one daemon touches the index, the lockfile/concurrency problem disappears by construction. The daemon is the only writer; clients only read/request.
 
 `core` stays I/O-free and unit-testable; all file/network/persistence is injected through interfaces. The daemon composes them; the shims/plugin are dumb transports.
+
+### Provider registry & recommendation engine (bring-what-you-have)
+
+The daemon hardcodes NO vendor. The user registers whatever models they have, **tagging each with one of three categories**. VaultNexus binds the best of each category to its job and a **recommendation engine** suggests the picks from what's present.
+
+**The three model categories (the user's mental model):**
+| Category | What it does | Required? | Examples (any vendor, local or API) |
+|---|---|---|---|
+| **1. Embedding model** | text → vectors (indexing + query + the Sentinel similarity-cull) | **Yes** (the one hard requirement) | Gemini-embedding, Nomic, EmbeddingGemma, OpenAI-3, Voyage-4, Cohere, Jina, BGE/Qwen3 local |
+| **2. Reranker** ("ranking" model) | reorder candidates by relevance | **No — optional** (skip → hybrid+expansion only) | Voyage rerank-2.5, Cohere rerank, Jina reranker, zerank-2 (local) |
+| **3. LLM** (the "judge"/generator) | adjudicate contradictions, narrate drift, synthesize | **Yes**, but the **host Claude session counts** (zero-key default) | the host session, or any Claude/GPT/Gemini/local chat model |
+
+- **Bring-what-you-have:** register any number per category (e.g. *3 OpenAI embedders*, or *3 local embedders*), any vendor, local or API. Local models run **in the daemon, never Obsidian** → no SC freeze.
+- **Recommendation engine** (deterministic, runs at setup + on registry change): from the registered set + a built-in quality/cost/latency table, it proposes one pick per category with a one-line rationale — e.g. *"Embedding → `gemini-embedding-001` (highest-quality you registered); Reranker → none registered → skipped (add one for +precision); LLM → your host Claude session (zero-key)."* User overrides any pick.
+- **Fully decoupled:** swap any category's model without touching the others. Reranker absent = fine. LLM = host session or your own keyed model. Only an **embedding-model** change forces a re-index (dims/space guard); reranker/LLM swaps are free.
 
 ### Data stores (single SQLite file per vault)
 - **sqlite-vec** — chunk embeddings (ANN; int8/Matryoshka to control size).
@@ -153,11 +169,11 @@ Transport: **stdio** (no HTTP → no DNS-rebinding exposure). All tools: `output
 
 ## 9. Offline build & dependency centralization
 
-**"Offline" = easy offline BUILD + local-first vault DATA. The ML runtime is API-based (Nomic + Voyage) — there are NO local ML models** (per user 2026-05-23). So there is no air-gapped *runtime*; the build is offline-able, the data is local, the inference is cloud.
+**"Offline" = easy offline BUILD + local-first vault DATA. The ML runtime is whatever the user registered** — API providers and/or **local models (run in the daemon, never Obsidian)**. A fully-local registry (local embedder + local reranker + local LLM via Ollama/LM-Studio/TEI) yields a **true air-gapped runtime**; an all-API registry is cloud. The user chooses per category.
 
-1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `rm -rf node_modules` → `pnpm install --offline --frozen-lockfile` against a warm/vendored store, on a **pinned pnpm version** (`11.0.7`, frozen). CI runs the install from a cold store on a **different arch** than `fetch` ran — the only real proof. **`sqlite-vec` + `better-sqlite3` are the only native deps** (no ONNX/transformers anymore); pre-fetch their prebuilt binaries per platform. Build is fully offline-able.
-2. **Runtime (API-based)** — embeddings via **Nomic Atlas API**, rerank via **Voyage `rerank-2.5` API**, Sentinel cull via embedding-similarity (Nomic), Judge via the host Claude session (tool-result-as-judge, zero-key). No Ollama daemon, no ONNX, no local model files. Needs network at query time.
-3. **What's local:** the vault markdown, the SQLite index (`sqlite-vec`+FTS5), the link/claim graph, all deterministic code (parser, chunker, assertion filter, RRF, git plumbing). Privacy note: note text is sent to Nomic/Voyage at index/query time — state this plainly (no on-device embedding option in this build).
+1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `rm -rf node_modules` → `pnpm install --offline --frozen-lockfile` against a warm/vendored store, on a **pinned pnpm version** (`11.0.7`, frozen). CI runs the install from a cold store on a **different arch** than `fetch` ran. **`sqlite-vec` + `better-sqlite3` are the only native deps**; pre-fetch their prebuilt binaries per platform. Build is fully offline-able.
+2. **Runtime = the provider registry** — the three model categories (embedder / reranker / LLM) are bound to whatever the user registered: cloud APIs, local endpoints, or a mix. No ML models are *bundled* with VaultNexus; local ones are the user's own, called over a local endpoint from the **daemon** (not Obsidian → no SC freeze).
+3. **What's always local:** the vault markdown, the SQLite index (`sqlite-vec`+FTS5), the link/claim graph, all deterministic code (parser, chunker, assertion filter, RRF, git). **Privacy:** with API providers, note text leaves the machine at index/query time — state this; with a local registry, nothing leaves. The README surfaces this per chosen provider.
 
 **Distribution:** **MCPB bundle** with vendored `node_modules` = primary (Node ships inside Claude Desktop/Code; only `sqlite-vec`/`better-sqlite3` natives ride along, per-platform). `npx -y @vaultnexus/mcp` = online convenience. `claude mcp add --transport stdio -- …` for dev.
 
