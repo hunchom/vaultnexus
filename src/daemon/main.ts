@@ -13,14 +13,11 @@ async function main(): Promise<void> {
   const lockPath = defaultLockPath();
   const httpPort = Number(process.env.VAULTNEXUS_HTTP_PORT ?? 38473);
 
-  let release: () => Promise<void>;
-  try {
-    release = await acquireSingleInstanceLock(lockPath);
-  } catch {
+  // single-writer guard → exit 1 if another daemon holds the lock
+  const release = await acquireSingleInstanceLock(lockPath).catch((): never => {
     process.stderr.write('vaultnexus: another daemon is already running\n');
     process.exit(1);
-    return; // unreachable — satisfies TS definite-assignment for release
-  }
+  });
 
   // Remove stale socket from prior crash to avoid EADDRINUSE.
   if (existsSync(socketPath)) rmSync(socketPath);
