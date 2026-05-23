@@ -9,7 +9,8 @@
     "vaultnexus-bridge": "dist/bridge/main.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev:daemon": "tsx src/daemon/main.ts",
     "dev:bridge": "tsx src/bridge/main.ts"
