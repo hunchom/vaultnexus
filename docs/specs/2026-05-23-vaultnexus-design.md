@@ -42,7 +42,7 @@ White space, verified against the 2026 landscape: (a) frontier semantic retrieva
 |---|---|---|
 | Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
 | Language | **TypeScript** | — |
-| Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
+| Store | **Dual backend behind one `Store` interface** (user wants overkill + zero concurrency worries + **no Docker**). **Default = daemon-managed embedded PostgreSQL 17 + pgvector 0.8** — **npm-prebuilt binaries, NO Docker, install-nothing**; **MVCC = unlimited concurrent readers AND writers** (kills the single-writer ceiling). One ACID store: vectors(`vector`/HNSW) + FTS(`tsvector`/GIN) + graph(recursive CTE) + claims + labels, one txn. **Fallback = sqlite-vec + FTS5** (zero-server, smallest air-gap). **Overkill tier (opt-in, `PG_URL`): your own Postgres + pgvectorscale (StreamingDiskANN→tens of millions) + pg_search (Tantivy BM25)** via prebuilt extension packages (Docker optional, NOT required). | Docker-required setups; pglite (single-connection); Milvus (no Node SDK); DuckDB (experimental HNSW persistence = data-loss); LanceDB (no graph + native sprawl); bundling AGPL pg_search into the MIT build |
 | **Provider registry** (one layer, 3 roles) | **Bring-what-you-have, any vendor, local OR API, multiples allowed** (user 2026-05-23). User registers their providers/models once; VaultNexus assigns each to a **role — embed / rerank / judge** — and a **recommendation engine** suggests the best assignment from what's available. **Local is fine — it runs in the daemon, not Obsidian** (so no SC freeze). Nothing pinned to one vendor. | hardcoding OpenAI; pinning rerank/judge; requiring a rerank or a specific host LLM |
 | ↳ embed role | any embedder in the registry (Gemini / Nomic / EmbeddingGemma / Voyage / OpenAI / Cohere / Jina / **local via Ollama/LM-Studio/TEI** / generic OpenAI-compat). **Dims model-driven** (vec0 sized at index time). | — |
 | ↳ rerank role | **OPTIONAL** — any reranker the user has (Voyage / Cohere / Jina / zerank / local), else **graceful skip** (hybrid+expansion only). Never required. | making rerank mandatory |
@@ -112,13 +112,25 @@ The daemon hardcodes NO vendor. The user registers whatever models they have, **
 - **First-class endpoint TYPES (user 2026-05-23):** the registry must accept **(a) OpenAI-format endpoints** — any base-URL + key via `@ai-sdk/openai-compatible` (covers LM-Studio, llama.cpp, vLLM, TEI, Together, Groq, Nomic, self-hosted) for embed + chat; and **(b) OpenRouter** via `@openrouter/ai-sdk-provider` (chat/LLM + reasoning; ⚠️ OpenRouter has **no embeddings endpoint** → it serves the **LLM/judge** category only). A registry entry is just `{category, providerType: openai|openai-compatible|openrouter|google|anthropic|voyage|ollama|…, baseURL?, apiKeyEnv, modelId}`.
 - **Recommender data = pulled, not hardcoded:** `models.dev/api.json` (chat/LLM cost+context) **+** LiteLLM `model_prices_and_context_window.json` (embeddings cost **+ dims** — models.dev omits embeddings). Vendored at build, refreshed on a cadence; tiny local override map for brand-new local models.
 
-### Data stores (single SQLite file per vault)
-- **sqlite-vec** — chunk embeddings (ANN; int8/Matryoshka to control size).
-- **FTS5** — BM25 full-text; fused with vector via **RRF** (k≈60).
-- **`links` table** — `(src, dst, type, heading, block, alias)`; 1–2 hop expansion via recursive CTE. Built from a markdown parser (headless) or, if a plugin is present, from Obsidian `metadataCache.resolvedLinks` after its `resolved` event (tagged as canonical; never merged with parser output).
-- **`claims` table** — the Claim Index (§6): sentence-grained, deterministic, content-hash-invalidated.
-- **content-hash cache** — re-embed only changed chunks.
-- *Note:* one writer at a time. A heartbeat **lockfile** guards the db; no lock → read-only mode (reads still served). Snapshots/writes are atomic (temp + fsync + rename). sqlite-vec is one native module — document its single prebuilt-binary step for air-gap (unlike LanceDB's 8-platform sprawl, which is why LanceDB is rejected here).
+### Data store — pluggable `Store`; PostgreSQL-default (Docker-free), SQLite-fallback
+
+**Default `PostgresStore` = daemon-managed embedded PostgreSQL 17 + pgvector 0.8.** Prebuilt PG binaries via npm (`embedded-postgres`-style); the daemon owns `start/stop` — **no Docker, install-nothing, real multi-connection server.** **MVCC** → unlimited concurrent readers + writers, so the SQLite single-writer apparatus (heartbeat lockfile, read-only-on-no-lock, WAL writer-serialization) is **deleted**. Tables, all in one ACID txn:
+- `chunks.embedding vector(<model-dim>)` + **HNSW** index (`vector_cosine_ops`); pgvector 0.8 **iterative scan** fixes over-filtering when constraining ANN by folder/tag/`state`.
+- FTS = `tsvector` **generated column** + GIN + `ts_rank_cd` → fused with vector via the same **RRF** CTE (k≈60). *(No external-content sync triggers — the generated column self-maintains.)*
+- `links(src,dst,type,heading,block,alias,source)` — 1–2 hop via **recursive CTE** (ports verbatim from the SQLite design). `claims` (Claim Index) + `vec_claims`. `content_hash` cache (re-embed only changed chunks/spans).
+- `index_meta` fingerprint + a migrations runner; the `spaceId` model-swap guard is store-agnostic (reuse).
+
+**Overkill tier (opt-in, `PG_URL`, NO Docker required):** point at your own Postgres carrying **pgvectorscale** (StreamingDiskANN, label-filtered, disk-resident → tens of millions) + **pg_search** (Tantivy BM25) — installed via prebuilt extension packages (apt/rpm/pgxn; Docker optional). Daemon detects extensions at boot → lights up DiskANN + Tantivy paths, else HNSW + native FTS. ⚠️ pg_search is **AGPL → use as a separate server, never bundle** its binary in the MIT MCPB.
+
+**Fallback `SqliteStore` = sqlite-vec + FTS5** — zero-server, smallest air-gap, CI smoke backend; transparently used if embedded-PG fails on a platform.
+
+**Migration from the prior SQLite DDL is mechanical and net-simpler:** recursive-CTE graph + RRF port near-verbatim; FTS triggers **and** the lockfile both vanish; only real cost is sync(`better-sqlite3`)→async(`pg`) at the `Store` boundary (`core` is already async-friendly).
+
+### Throughput — "gets hammered, never throttles"
+- **DB:** one `pg.Pool` split into **reader + writer pools** over MVCC (no PgBouncer — single local process); prepared statements for hot queries; multi-row `INSERT`/`COPY` for bulk index. Pipelining deprioritized (local Unix socket = ~no RTT).
+- **API (the real bottleneck):** **`undici`** keep-alive `Pool` per provider host; **embedding micro-batching** (provider-max arrays); **`p-queue`** with per-provider concurrency caps + **backpressure** + `Retry-After`/429 backoff — the governor that makes a 100k-note cold index shape to the rate limit instead of erroring.
+- **CPU:** **`Piscina`** worker-thread pool for parse/chunk/sentence-split → event loop stays free (100k-note re-index while Obsidian holds 60fps).
+- **Cache (2 tiers, DB-backed, delta-invalidated):** content-hash→embedding cache + short-TTL query-result cache (query-embedding + RetrievalConfig hash → ranked hits).
 
 ## 5. Retrieval pipeline
 

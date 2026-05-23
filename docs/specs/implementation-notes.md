@@ -10,8 +10,11 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 |---|---|---|
 | node | **>=22** (`.nvmrc=22`) | matches Claude Desktop's bundled Node (ABI 127) |
 | pnpm | **11.0.7** (frozen) | offline-fetch regressions; freeze one patch for the whole air-gap cycle |
-| better-sqlite3 | 12.x (≥12.10.0) | FTS5 built-in; ABI-bound native `.node` |
-| sqlite-vec | 0.1.9 | loadable ext, pure optionalDependencies (clean air-gap); brute-force only (ANN is 0.1.10-alpha) |
+| **postgres (default)** | PG **17** + pgvector **0.8** | embedded via `embedded-postgres` (npm prebuilt, no Docker); driver `pg` 8.x; MVCC |
+| pgvectorscale / pg_search | latest | **opt-in `PG_URL` tier** (StreamingDiskANN / Tantivy BM25); pg_search AGPL = server-only |
+| undici / p-queue / Piscina | latest / 8.x / 4.x | HTTP pools / API concurrency+backpressure / worker-thread parse-chunk pool |
+| better-sqlite3 (fallback) | 12.x (≥12.10.0) | FTS5 built-in; ABI-bound native `.node` |
+| sqlite-vec (fallback) | 0.1.9 | loadable ext, pure optionalDependencies (clean air-gap); brute-force only (ANN is 0.1.10-alpha) |
 | @modelcontextprotocol/sdk | ≥1.24.0 (1.29.x ok) | ≥1.24.0 only matters if HTTP (DNS-rebinding); stdio fine |
 | zod | 4.x | SDK accepts v3/v4/Standard-Schema |
 | ~~@huggingface/transformers~~ | — | **DROPPED** (no local ML models per user 2026-05-23) |
@@ -24,8 +27,11 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 | chokidar | 4.x | watcher; v4 dropped globs+rename → watch dir, filter in code |
 | tsup | 8.x | ESM-only, `target node22`, native deps external |
 
-## 1. Storage engine (`src/store/`)
+## 1. Storage engine (`src/store/`) — pluggable `Store`, PostgreSQL-default (no Docker)
 
+- **DEFAULT `PostgresStore` = daemon-managed embedded PostgreSQL 17 + pgvector 0.8** (driver `pg` async + `pg.Pool`). Prebuilt PG binaries via `embedded-postgres` (npm, 5 platforms) — **no Docker, install-nothing**; daemon owns lifecycle. **MVCC → unlimited concurrent r/w** ⇒ the SQLite lockfile + WAL-single-writer are **deleted**. DDL: `chunks.embedding vector(dim)` + HNSW (`vector_cosine_ops`, 0.8 iterative-scan for filtered ANN); FTS = `tsvector` **generated column** + GIN + `ts_rank_cd` (no sync triggers); `links`/`claims`/`vec_claims`/`content_hash` as before; recursive-CTE graph + RRF CTE port verbatim. Throughput: **reader+writer pools** (no PgBouncer), prepared statements, `COPY`/multi-row insert.
+- **Overkill tier (opt-in `PG_URL`, no Docker required):** own Postgres + **pgvectorscale** (StreamingDiskANN) + **pg_search** (Tantivy BM25) via prebuilt extension packages; daemon detects → DiskANN+Tantivy paths. pg_search AGPL → server-only, never bundled.
+- **FALLBACK `SqliteStore`** (zero-server, smallest air-gap, CI smoke) ↓ keeps the full sqlite-vec design below:
 - **Driver: `better-sqlite3`** (sync, FTS5 built-in). `node:sqlite` rejected — no FTS5. Pragmas every connection: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`.
 - **Vectors: `sqlite-vec`** via `import * as sqliteVec from 'sqlite-vec'; sqliteVec.load(db)` → resolves `sqlite-vec-<os>-<arch>/vec0.<ext>`. 5 triples; **no musl/Alpine, no win-arm64** (build from source there).
 - **Schema** (full DDL in the sqlite-vec agent report): `index_meta`(embedding fingerprint), `notes`, `chunks`, **`vec_chunks`** vec0 `float[<model-dim>] distance_metric=cosine` (768 for Gemini-768/Nomic; → `int8[]` at scale), **`fts_chunks`** FTS5 external-content (+3 sync triggers — mandatory), `links`(src,dst,type,heading,block,alias,source), `claims`, **`vec_claims`** (sentence-grained vec0), soft-delete via `state`. **Use a vec0 `partition key` column** (folder/notebook) — shipped in 0.1.9 — to pre-filter before the brute-force scan; raises the comfortable-scale ceiling past 250k without ANN.
@@ -137,7 +143,12 @@ Goal: maximize reuse of permissive OSS. **License posture: only MIT / Apache-2.0
 ### npm-depend (drop in + thin adapter)
 | Need | Package | License |
 |---|---|---|
-| Vector store | `sqlite-vec` 0.1.9 + `better-sqlite3` | Apache / MIT |
+| Store (default) | embedded **PostgreSQL 17 + pgvector** via `embedded-postgres` + `pg` (no Docker, MVCC) | PostgreSQL / MIT |
+| Store (overkill opt-in) | `pgvectorscale` + `pg_search` into your own PG | PostgreSQL / **AGPL (server-only)** |
+| Store (fallback) | `sqlite-vec` 0.1.9 + `better-sqlite3` | Apache / MIT |
+| Throughput | `undici` (HTTP pools) + `p-queue` (API governor) + `Piscina` (worker pool) | MIT |
+| Provider layer | **Vercel AI SDK** (`ai`+`@ai-sdk/*`) + `voyageai-ai-provider` + `@openrouter/ai-sdk-provider` | Apache/MIT |
+| Recommender data | `models.dev` json + LiteLLM prices json | MIT |
 | Markdown→mdast | `unified`+`remark-parse`+`remark-gfm`+`remark-frontmatter`+`gray-matter` | MIT |
 | Wikilink **tokenizer** (resolution stays ours) | `micromark-extension-wiki-link`+`mdast-util-wiki-link` (stale → pin SHA or vendor ~200 LOC) | MIT (npm) |
 | Sentence segmentation (offset-preserving via `splitAST`) | `sentence-splitter` | MIT |
