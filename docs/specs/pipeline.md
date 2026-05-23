@@ -62,7 +62,7 @@ Key property: a 100k-note vault can be re-indexing in the daemon while Obsidian 
 | 3 | Wikilink resolve | shortest-path + block/heading | algorithm from **obsidian-export** | steal algorithm | https://github.com/zoni/obsidian-export |
 | 4 | Chunk | header→512tok, offset-faithful, BM25 blurb | sep-list from LangChain.js | steal pattern | https://github.com/langchain-ai/langchainjs |
 | 5 | Sentence-split | Claim Index provenance | `sentence-splitter` (`splitAST`) | **depend** | https://github.com/textlint-rule/sentence-splitter |
-| 6 | Embed | doc/query vectors (768d) | **Nomic Atlas API** | **depend (API)** | https://docs.nomic.ai/reference/endpoints/nomic-embed-text |
+| 6 | Embed | doc/query vectors (model-dim) | **pluggable registry** (default `gemini-embedding-001` @768; Nomic/Gemma/Voyage/OpenAI/Cohere/Jina/generic) | **depend (API)** | https://ai.google.dev/gemini-api/docs/embeddings |
 | 7 | Store | vectors+BM25+graph+claims | `sqlite-vec`+`better-sqlite3`+FTS5 | **depend** | https://github.com/asg017/sqlite-vec |
 | 8 | Hybrid search | vec⊕BM25 RRF k=60 | Alex Garcia RRF CTE | steal SQL | https://alexgarcia.xyz/blog/2024/sqlite-vec-hybrid-search/index.html |
 | 9 | Graph expand | 1-2 hop wikilinks | SQL recursive CTE | build | (SQLite) |

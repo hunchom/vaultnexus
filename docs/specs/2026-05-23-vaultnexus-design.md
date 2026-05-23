@@ -82,12 +82,13 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 
 **The #1 Smart Connections problem: it embeds/indexes *inside Obsidian's renderer* → freezes the app.** VaultNexus inverts this: **one long-running engine daemon owns all compute; every UI is a thin client.**
 
-- **`vaultnexus` engine (daemon)** — a standalone Node process. Watches the vault on the filesystem, owns the single SQLite index (single writer → no concurrent-writer corruption), runs parse/chunk/embed-calls/hybrid-search/Sentinel/git. **All CPU lives here, in its own process — never in Obsidian.** Embeddings + rerank are API calls (Nomic/Voyage), so even this process is mostly I/O-bound; the only real CPU is sqlite-vec brute-force search + parsing.
-- **IPC: Unix domain socket by default** (no network surface → no DNS-rebinding risk, filesystem-permission-gated), **loopback HTTP optional** (for HTTP-MCP clients) with the hardening in §8.
+- **`vaultnexus` engine (daemon)** — a standalone Node process (HTTP server = **Hono** + `@hono/node-server`, which binds both a Unix socket and loopback). Watches the vault, owns the single SQLite index (single writer → no concurrent-writer corruption), runs parse/chunk/embed-calls/hybrid-search/Sentinel/git. **All CPU lives here — never in Obsidian.** Embeddings + rerank are API calls, so it's mostly I/O-bound; the only real CPU is sqlite-vec brute-force search + parsing. Single-instance via **`proper-lockfile`** heartbeat; process model = bare-stdlib `spawn(detached).unref()` (`vaultnexus daemon` foreground / `vaultnexus start` detached) — **not** PM2. Validated by research: `obsidian-local-rest-api` runs its server *in the renderer* — exactly the freeze anti-pattern we avoid.
+- **Dual transport from one Hono app:** **Unix domain socket** (for the Claude Code shim — no network surface, no DNS-rebinding) **AND loopback HTTP on 127.0.0.1** (REQUIRED for the Obsidian plugin — see below). Stale-socket guard: unlink+relisten only if the lockfile shows no live owner.
 - **Clients are thin:**
-  - **Claude Code** → `shim/` (a tiny stdio-MCP proxy that forwards to the daemon socket). Claude Code sees a normal stdio MCP server; the work happens in the daemon.
-  - **Obsidian** → `clients/obsidian/` thin plugin: renders results, sends queries/edits over HTTP/socket. **Zero embedding/indexing/search in the renderer** — Obsidian stays fast no matter how big the vault.
+  - **Claude Code** → `shim/`: depend on **`mcp-proxy`** `startStdioServer({serverType, url})` (~30 LOC: check lock → autostart daemon if down → proxy stdio↔daemon). Don't hand-write it (same lib FastMCP trusts).
+  - **Obsidian** → `clients/obsidian/` thin plugin (seed from official `obsidian-sample-plugin`): renders results, calls the daemon via Obsidian's **`requestUrl()` over loopback HTTP** — ⚠️ the renderer **cannot** reach a Unix socket and plain `fetch` is CORS-blocked (`app://obsidian.md` origin), so loopback HTTP is mandatory for the plugin. **Zero embedding/indexing/search in the renderer** → Obsidian stays at 60fps regardless of vault size.
   - Claude Desktop / Cursor → HTTP-MCP to the same daemon.
+- **MCP framework:** stay on raw `@modelcontextprotocol/sdk` — FastMCP/xmcp/mcp-framework all just wrap it and add HTTP-deploy DX the daemon makes redundant. (Borrow only FastMCP's `UserError` shape for clean tool errors.)
 - **Single source of truth + single writer:** because exactly one daemon touches the index, the lockfile/concurrency problem disappears by construction. The daemon is the only writer; clients only read/request.
 
 `core` stays I/O-free and unit-testable; all file/network/persistence is injected through interfaces. The daemon composes them; the shims/plugin are dumb transports.
@@ -124,8 +125,8 @@ query
 1. **Claim Index lookup** — retrieve semantically-related prior *claims* (sentence-grained, not chunks — chunks are too coarse for pair contradiction).
 2. **Assertion pre-filter** (the biggest precision lever) — only first-person, assertive, settled sentences. Drop questions, quoted/attributed spans (`>` blockquotes, "X said", citations), hedged/hypothetical/draft sentences, and zones the user marked non-settled (`## Counterarguments`, `#draft`/`#fleeting` tags, daily-note free-writing).
 3. **Similarity cull** — rank related claims by **Nomic-embedding distance** (API), keep top-K above a similarity floor, capped at `JUDGE_BUDGET`. *No local NLI model* (per user 2026-05-23: API-only ML) — the Judge is the arbiter anyway; the assertion pre-filter (step 2, deterministic) does the heavy precision lifting before this.
-4. **Judge** (the arbiter) via the **`Judge` interface** — default **tool-result-as-judge** (return candidates as `structuredContent`; the Claude session adjudicates contradiction vs agreement vs update, w/ attribution/hypothetical/temporal — zero key, works in every client). Optional direct-API judge for the non-conversational standing view.
-5. **Temporal reframe** — if the conflicting note is newer, surface as *"You've changed your mind since [[A]] (Jan 14)"*, not "you contradict yourself." Most vault "contradictions" are just learning.
+4. **Judge** (the arbiter) via the **`Judge` interface** — default **tool-result-as-judge** (return candidates as `structuredContent`; the Claude session adjudicates contradiction vs agreement — zero key, works in every client). **Bias-hardened (arXiv 2509.26072 "Silent Judge"):** the contradiction call is **order-blinded + timestamp-blinded** — no recency/date cue, candidate order randomized, "ignore length" instruction — so the judge decides *contradiction-or-not* on content alone, never nudged toward the newer note.
+5. **Temporal reframe — a SEPARATE deterministic step** (not the judge's job): once a contradiction is confirmed, compare `asserted_at` (git/frontmatter) and frame it — newer ⇒ *"You've changed your mind since [[A]] (Jan 14)"*, else a standing tension. Most vault "contradictions" are just learning, but the *framing* is computed by us, not inferred by a bias-prone LLM.
 6. **Confirm-and-learn** — surface as a question with exact citations + one-click *not-a-contradiction / it's-an-update / reconcile*; every dismissal is a stored label that raises the threshold for similar pairs.
 
 **Belief-drift** (`recall_history`) — on demand, walk git history + dated notes for a topic, hand the chronology to the Judge to *narrate the arc*. No maintained fact graph. (Frontier judge recommended; local judge is mushier — labeled.)
@@ -148,7 +149,7 @@ Transport: **stdio** (no HTTP → no DNS-rebinding exposure). All tools: `output
 
 **Resources:** `note://{path}` + `vault://index`; `listChanged` on create/delete.
 
-**Future plugin (P2) security:** if it ever serves MCP over HTTP, pin TS SDK ≥1.24.0 (or apply `hostHeaderValidation`), bind loopback only, validate Origin/Host, require a bearer token on every request (GHSA-w48q-cv73-mx4w). Not applicable to the stdio engine.
+**HTTP security (REQUIRED — the daemon serves loopback HTTP for the Obsidian plugin):** pin TS SDK ≥1.24.0 (or apply `hostHeaderValidation`), **bind 127.0.0.1 only**, validate `Origin`/`Host` against a loopback allowlist, **require a bearer token on every request** (GHSA-w48q-cv73-mx4w DNS-rebinding). The Unix-socket path (Claude Code shim) has no network surface and needs only filesystem perms. Token lives in daemon config; the plugin reads it from a user setting.
 
 ## 9. Offline build & dependency centralization
 
