@@ -43,13 +43,13 @@ White space, verified against the 2026 landscape: (a) frontier semantic retrieva
 | Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
 | Language | **TypeScript** | — |
 | Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
-| Embeddings | **Voyage-4** (`-large` index / `-4` query) online / **bge-m3 via Ollama** offline / OpenAI | Hardcoded Voyage (breaks offline); voyage-context-3 (older, pricier — A/B only) |
-| Reranker | rerank-2.5 online / local cross-encoder (bge-reranker) **in the Node engine** offline | in-renderer rerank — impossible (279–571 MB models, broken transformers.js, plugin policy) |
+| Embeddings | **Nomic `nomic-embed-text-v1.5`** (768-dim, Ollama-local default / Nomic Atlas API); Voyage/OpenAI optional | per user; open weights, runs local, task-prefix asymmetry. bge-m3/Voyage-as-default dropped |
+| Reranker | **Voyage rerank-2.5 always** (assume API reachable, even in local-first mode) | local cross-encoder — dropped per user; Voyage assumed available at runtime |
 | Sentinel judge | **`Judge` interface**: tool-result-as-judge (default, zero-key) / direct-API / local-LLM | **MCP `sampling`** — dead in Claude Code/Desktop, deprecated protocol-wide |
 | First-run config | **config file** (+ plugin settings UI later) | **MCP `elicitation`** — unsupported in flagship clients |
 | Graph | wikilinks as free structure; **bounded 1-hop expansion** via SQL CTE | HippoRAG PPR + global PageRank — hub-bias on sparse vaults, hurts single-hop QA |
 | Temporal | **git history + mtime + frontmatter dates** | Graphiti bi-temporal LLM fact graph — contradicts thesis, drifts, costly |
-| Context | contextual embedding + **deterministic** BM25 blurb | Anthropic Haiku contextual-prefix — redundant + worse |
+| Context | standard embedding + **deterministic** BM25 blurb (title+header-path+tags+linked-titles) | Anthropic Haiku contextual-prefix — redundant + worse |
 | Writes | **our own tools**; FS atomic (temp+fsync+rename); REST only as a headless→live-Obsidian bridge | routing in-process writes through localhost REST; pointing clients at two MCP servers (tool-overlap confusion) |
 | MCP SDK | TS SDK v1.x (≥1.24.0 if HTTP ever used) | — |
 
@@ -64,8 +64,8 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 │   │               VaultReader, VaultWriter, LinkGraphSource)
 │   ├── store/     SQLite (sqlite-vec + FTS5): chunk vectors, BM25, link table,
 │   │              claim table, content-hash cache. Single .db file per vault.
-│   ├── providers/ Voyage / Ollama / OpenAI embeddings; rerank-2.5 / local
-│   │              cross-encoder; Judge backends; local NLI cull
+│   ├── providers/ Nomic embeddings (Ollama/Atlas) [Voyage/OpenAI optional];
+│   │              Voyage rerank-2.5; Judge backends; local DeBERTa NLI cull
 │   ├── server/    stdio MCP server (tools, resources, instructions)
 │   └── index/     FS walk + chunker + parser + chokidar watcher + hash-cache
 ├── docs/specs/    this document
@@ -86,13 +86,13 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 
 ```
 query
-  → embed(query, input_type=query) → sqlite-vec vector search  ┐
+  → embed(query, "search_query: ") → sqlite-vec vector search  ┐
   → query terms → FTS5 BM25                                     ┘→ RRF → candidate pool
         │
         ├─ bounded wikilink expansion: 1-hop neighbors of top seeds via SQL CTE
         │     (2-hop only on explicit "explore/related" intent), capped, deduped
         ├─ light structural boosts (small weight): recency, link-overlap-with-seeds, tag-match
-        └─ rerank (rerank-2.5 online / local cross-encoder offline): ~20–30 in → 5–8 out
+        └─ rerank (Voyage rerank-2.5, assumed reachable): ~20–30 in → 5–8 out
                 → cited hits { path, heading, blockId?, snippet, score }
 ```
 
@@ -137,8 +137,8 @@ Transport: **stdio** (no HTTP → no DNS-rebinding exposure). All tools: `output
 Three distinct "offline"s, handled separately (the v1 spec conflated them):
 
 1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `pnpm install --offline` against a warm/vendored store, on a **pinned pnpm version** (dodges the 10.12.2 offline regression). CI runs `pnpm install --offline` from a cold store on a **different arch** than `fetch` ran — the only real proof. sqlite-vec is the one native dep: pre-fetch its prebuilt binary for the target platform; LanceDB rejected partly to avoid 8-platform native sprawl.
-2. **Offline engine runtime** — embeddings via **bge-m3 in Ollama** (a separate localhost daemon — state this plainly); reranker + NLI via local ONNX **in the Node engine** (never a renderer). Air-gap models: tar `~/.ollama/models` from a connected box + vendor the ONNX NLI/reranker weights to a cache dir (nothing GB-scale enters git or the bundle). Engine makes **zero network calls** at query time in offline mode.
-3. **Honest quality gap** — offline embeddings (bge-m3) ≈ 2–3 NDCG below Voyage-4; offline judge (local LLM) is materially weaker at belief discrimination (label it). With the local reranker present the gap is small; without it, offline = hybrid-only (degraded), surfaced as a `−rerank` eval config.
+2. **Engine runtime** — embeddings via **Nomic `nomic-embed-text` in Ollama** (a separate localhost daemon — state this plainly; or Nomic Atlas API); **rerank via Voyage `rerank-2.5`** (cloud, assumed reachable); **NLI cull via local DeBERTa ONNX in the Node engine** (never a renderer). Local-data, local-embed; cloud rerank. Optional air-gap: tar `~/.ollama/models` + vendor the DeBERTa ONNX to a cache dir (nothing GB-scale enters git/bundle) — but note rerank then needs network unless disabled.
+3. **Honest framing** — rerank is **always Voyage `rerank-2.5`** (assume reachable). Embeddings = **Nomic** (open weights, local via Ollama). Judge default = tool-result-as-judge (host Claude session, zero-key); a local-LLM judge fallback is weaker at belief discrimination (label it). "Offline/local-first" = local vault data + easy offline *build* + local embeddings, with Voyage rerank at runtime — not a guaranteed zero-network runtime.
 
 **Distribution:** **MCPB bundle** with vendored `node_modules` = primary + air-gappable (Node ships inside Claude Desktop/Code). `npx -y @vaultnexus/mcp` = online convenience only (not air-gappable). `claude mcp add --transport stdio -- …` for dev.
 
@@ -173,7 +173,7 @@ Three distinct "offline"s, handled separately (the v1 spec conflated them):
 
 ## 13. Open questions
 
-- Offline embedding model: **bge-m3** is the leading default (1024-dim, multilingual, Apache-2.0, sparse+dense) — confirm via eval on a sample vault.
+- Embedding model: **Nomic `nomic-embed-text-v1.5`** (768-dim, 8192 ctx, Apache-2.0, Matryoshka), default via Ollama; `-v2-moe` if multilingual matters — confirm dim (768 vs Matryoshka 512) via eval on a sample vault.
 - NLI model size/quality tradeoff: `nli-deberta-v3-small` (Apache-2.0, pre-converted) default; validate ONNX runtime early (known DeBERTa-v3 export gremlins).
 - Vault path + git-backed? (enables temporal/drift) — from config at first run.
 - sqlite-vec vault-size ceiling vs a pure-JS fallback — measure; document the crossover.
