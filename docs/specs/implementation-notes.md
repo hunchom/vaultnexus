@@ -123,3 +123,55 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 - sqlite-vec brute-force only until 0.1.10 ANN ships stable — don't depend on ANN for v1.
 - `@xenova/transformers` is legacy → use `@huggingface/transformers` v3.
 - MCP `sampling`/`elicitation` minority-supported → tool-result-as-judge + 2-call-confirm sidestep both.
+
+## 11. Assembly plan (reuse map — glue, don't write)
+
+Goal: maximize reuse of permissive OSS. **License posture: only MIT / Apache-2.0 / ISC / BSD-2 in the "take" column. AGPL + no-compete quarantined to STUDY-ONLY (architecture/ideas, never code or license text).** Every mature *whole-app* RAG-over-Obsidian is AGPL / no-compete / archived / Python → reuse is **component-level**, not app-level.
+
+### npm-depend (drop in + thin adapter)
+| Need | Package | License |
+|---|---|---|
+| Vector store | `sqlite-vec` 0.1.9 + `better-sqlite3` | Apache / MIT |
+| Markdown→mdast | `unified`+`remark-parse`+`remark-gfm`+`remark-frontmatter`+`gray-matter` | MIT |
+| Wikilink **tokenizer** (resolution stays ours) | `micromark-extension-wiki-link`+`mdast-util-wiki-link` (stale → pin SHA or vendor ~200 LOC) | MIT (npm) |
+| Sentence segmentation (offset-preserving via `splitAST`) | `sentence-splitter` | MIT |
+| Token budget proxy | `gpt-tokenizer` (`o200k_base`) | MIT |
+| Embeddings | `ollama` (ollama-js) [+ raw-fetch Nomic Atlas fallback] | MIT |
+| Rerank | `voyageai` (official SDK; instruction-prepend-to-query confirmed) | MIT |
+| NLI runtime | `@huggingface/transformers` v3 | Apache |
+| Git (belief-drift) | `simple-git` (`.raw(['log','-G…','--all'])` pickaxe + `.show()`) | MIT |
+| MCPB packer (devDep) | `@anthropic-ai/mcpb` | MIT |
+| Stats primitives | `simple-statistics` | ISC |
+| Watcher | `chokidar` 4.x | MIT |
+| Community clustering (Epistemic view) | `graphology-communities-louvain` | MIT |
+| REST-bridge client (codegen) | `@hey-api/openapi-ts` (devDep) from coddingtonbear OpenAPI | MIT |
+
+### Vendor (pinned, kept out of git)
+- **`cyanheads/obsidian-mcp-server` (Apache-2.0)** → `section-extractor.ts` + `frontmatter-ops.ts` (pure in-memory; swap one `notFound` import) + keep NOTICE. The surgical heading/block/frontmatter edit brain = taken.
+- **`Xenova/nli-deberta-v3-small` q8 ONNX (Apache-2.0)** → pinned SHA, air-gap cacheDir.
+
+### Copy-pattern (lift code/SQL/prompts into repo; permissive)
+- 🏆 **Quartz `ofm.ts` (MIT)** → Obsidian-flavored-markdown handler (block-refs `^id`, callouts, embeds, tags). Biggest parsing lift.
+- **Alex Garcia's RRF CTE (Apache, sqlite-vec)** → copy the hybrid query verbatim, adapt schema, k=60.
+- **obsidian-export (BSD-2)** → wikilink shortest-path/longest-match **resolution algorithm** → reimplement in `core`.
+- **LangChain.js Markdown separator list (MIT)** → chunker recursive-pack (it drops offsets → don't wrap the class).
+- **autoevals `js/ragas.ts` (MIT)** → the 4 RAGAS metric prompt templates, rewired onto our `Judge`+`Embedding`.
+- **ragas `TestsetGenerator` (Apache)** → golden-gen taxonomy (single/multi-hop 50/25/25) + anti-leakage prompt rules.
+- **`negspacy` (MIT)** → port the 4 NegEx/ConText cue categories to a TS regex lexicon (data, not code) for the assertion filter.
+- TS SDK `examples/server-quickstart` → seed the stdio server (⚠️ verify the import surface the installed 1.29.x actually ships; README shows a newer alias).
+- Cyanheads tool-input-schema shapes; `wink-nlp` negation handling (reference); MCPB `examples/hello-world-node` manifest.
+
+### Wrap-subprocess (dev/CI only — NEVER shipped, gated behind a dev extra)
+- **`pytrec_eval` (MIT)** = the BEIR oracle → assert our TS NDCG@10/Recall@k/MRR match within 1e-6 (matching it = BEIR-comparable by construction). `ir_measures` (Apache) = friendlier-CLI alt.
+- **`ragas` (Apache, Python)** → one-time ±0.05 cross-check of faithfulness/context-precision/recall.
+
+### Port the method (no code reuse — license-blocked source)
+- **Smart Connections head-to-head** → replicate `TaylorAI/bge-micro-v2` (MIT model) + mean-pool + cosine, no graph/rerank, on our existing transformers runtime (~50 lines). SC source is `NOASSERTION`/no-compete → never vendor/fork.
+
+### STUDY-ONLY (AGPL / no-compete / Python — ideas, not code)
+`basic-memory` (AGPL — Entity/Observation/Relation markdown grammar idea only), `khoj`/`Reor` (AGPL), `smart-connections` (no-compete), Graphiti/mem0/cognee/Letta (Apache but Python + LLM-graph shape we rejected), `remark-obsidian` (GPL — banned dep).
+
+### Build fresh = the moat (no OSS exists; this IS the product)
+Sentinel orchestration cascade · assertion pre-filter policy · confirm-and-learn 3-tier suppression + per-vault τ-calibration · Claim Index (deterministic, content-hash-invalidated) · Epistemic Integrity construction · `Judge` interface + tool-result-as-judge · offset-faithful chunker (never split code/tables/callouts) · wikilink **resolution** · the eval harness shell (FP-primary, A/B ladder, bootstrap CI + paired permutation test ~40 lines — no JS lib does these).
+
+**Net:** plumbing + parsing front-end + edit brain + packaging + metric-validation are ~80–90% **assembled from MIT/Apache/ISC/BSD**. Bespoke = exactly the spec's stated moat (retrieval intelligence + Sentinel), nothing more. Open license checks before depending: `@nomic-ai/atlas` LICENSE (use raw-fetch if awkward; Ollama is the default anyway).
