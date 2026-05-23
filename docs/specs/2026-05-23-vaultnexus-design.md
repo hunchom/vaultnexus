@@ -1,9 +1,9 @@
-# VaultNexus — Design Spec
+# VaultNexus — Design Spec (v2.1)
 
 > **VaultNexus doesn't just search your second brain — it argues back.**
-> A Claude Code ↔ Obsidian knowledge engine: best-in-class semantic + graph retrieval over your vault, plus a Sentinel that catches you contradicting yourself and shows how your thinking drifts over time. Plugin-first, MCP-exposed, fully offline-capable, one-command GitHub build.
+> A Claude Code ↔ Obsidian knowledge engine: best-in-class semantic + graph retrieval over your vault, plus a Sentinel that catches you contradicting yourself and shows how your thinking drifts over time. **Headless-first** (one Node package, stdio MCP), fully offline-capable, one-command GitHub build. Obsidian plugin is an optional later enhancement.
 
-Status: **Design — pending user approval**
+Status: **Design v2.1 — incorporates two rounds of adversarial review (8 agents). Pending user approval.**
 Date: 2026-05-23
 Spec owner: Roger
 
@@ -11,165 +11,170 @@ Spec owner: Roger
 
 ## 1. Problem & opportunity
 
-Existing Obsidian AI tools fall in three buckets, and all leave the same gap:
+Existing Obsidian AI tools fall in three buckets, all leaving the same gap:
 
-- **Smart Connections** (5k★) — local 384-dim `bge-micro` cosine similarity, no graph reasoning, no API/MCP, no write-back.
-- **basic-memory** — good data model (typed observations + relations in markdown), but flat, atemporal retrieval.
-- **Every Obsidian MCP server** — thin CRUD-over-REST wrappers. The only one doing real semantic search (`jacksteamdev`) **archived 2026-05-13**. The Local REST API plugin now ships built-in `/mcp/` CRUD, commoditizing the write-tool layer.
+- **Smart Connections** (5k★) — local 384-dim cosine similarity, no graph reasoning, no API/MCP, no write-back.
+- **basic-memory** — good data model, flat/atemporal retrieval.
+- **Every Obsidian MCP server** — thin CRUD-over-REST wrappers; the one real semantic one (`jacksteamdev`) **archived 2026-05-13**. Local REST API now ships built-in `/mcp/` CRUD.
 
-**Nobody** does: (a) frontier-grade semantic retrieval fused with the wikilink graph, exposed over MCP; (b) a tool that *protects the integrity of your thinking* by surfacing contradictions and belief-drift. That second one is genuine white space — confirmed unbuilt.
-
-The timing is ideal and the moat is the **retrieval brain + the Sentinel**, not CRUD.
+White space, verified against the 2026 landscape: (a) frontier semantic retrieval *fused with the wikilink graph* + reranking, MCP-exposed (no shipping tool reranks); (b) a tool that **protects the integrity of your thinking** — contradiction + belief-drift. No published false-positive benchmark for personal-vault contradiction detection exists; that absence *is* the opportunity. The moat is the **retrieval brain + the Sentinel**, not CRUD.
 
 ## 2. Goals / non-goals
 
 **Goals**
-- Best-quality retrieval over a personal vault: hybrid (vector + BM25) + bounded wikilink expansion + cross-encoder rerank, cited to `path#heading^block`.
-- The **Contradiction & Belief-Drift Sentinel** as the defining, novel capability.
-- **Plugin-first**: run in-process in Obsidian for the canonical link graph; serve MCP over HTTP so every MCP client (Claude Code, Desktop, Cursor, Copilot, Smart Composer) can use it; ship a headless stdio MCP for the Obsidian-closed/CI case.
-- **Fully offline mode**: local embeddings + local reranker + local NLI via Ollama/transformers.js. Online mode (Voyage-4 + rerank-2.5) is the max-quality option, not a requirement.
-- **GitHub-ready, offline-buildable, centralized deps**: pure-JS/TS stack (no native compilation), pnpm workspace + catalog, committed lockfile.
-- Agentic write-back with verifiable, dry-run-by-default, link-safe edits.
+- Best-quality retrieval: hybrid (vector + BM25 + RRF) + bounded wikilink expansion + cross-encoder rerank, cited to `path#heading^block`.
+- The **Contradiction & Belief-Drift Sentinel** + a standing **Epistemic Integrity** view as the defining novelty.
+- **Headless-first**: one Node package, stdio MCP server, reads the vault from the filesystem. Works with Obsidian open or closed. Usable by Claude Code, Claude Desktop, Cursor, etc.
+- **Offline-capable, honestly scoped**: three distinct "offline"s (build / engine-runtime) handled explicitly. Local embeddings + reranker + NLI run in the Node engine (never a UI renderer). Online mode (Voyage-4 + rerank-2.5) is the max-quality option.
+- **GitHub-ready, offline-buildable, deps centralized**: pnpm catalog + committed lockfile, MCPB bundle with vendored deps for air-gap.
+- Agentic write-back: our own tools, dry-run + confirm, link-safe.
 
 **Non-goals**
-- Competing on CRUD (delegate to Local REST API `/mcp/`).
-- A persistent LLM-extracted entity/fact graph (killed — see §10).
+- Competing on CRUD (it's commoditized).
+- A persistent LLM-extracted entity/fact graph (killed — §10). *(The minimal deterministic Claim Index in §6 is NOT this — see §10.)*
+- Plugin-first. The Obsidian plugin is a **P2 optional enhancement**, not the primary vehicle.
 - Multi-user / cloud sync. Single-user, local-first.
-- Mobile (desktop-first; plugin may degrade gracefully).
+- Running models in the Obsidian renderer (proven infeasible — §9).
 
 ## 3. Guiding decisions (and what was rejected)
 
-| Decision | Choice | Rejected alternative & why |
+| Decision | Choice | Rejected & why |
 |---|---|---|
-| Language | **TypeScript**, pure-JS deps | Python — against the Obsidian grain; native deps hurt offline build |
-| Vehicle | **pnpm/turbo monorepo**: `core` + `plugin` + `mcp` | Standalone stdio-only — loses canonical graph + cedes plugin surface to competitor (`aaronsb/obsidian-mcp-plugin`) |
-| Vector store | **Orama** (pure-JS: vector + BM25 + hybrid) | LanceDB — native `.node` binaries can't load in Obsidian's Electron renderer; hurts offline build. Kept behind interface for huge headless vaults only |
-| Embeddings | **Provider interface**: Voyage-4 (online best) / **Ollama-local (offline default)** / OpenAI | Hardcoded Voyage — breaks offline + privacy; Voyage-4 > context-3 (newer, 3× cheaper, shared space) |
-| Reranker | rerank-2.5 (online) / local cross-encoder (offline) | none — rerank is the single highest-ROI quality lever |
-| Graph | wikilinks as free structure; **bounded 1-hop expansion** | HippoRAG PPR + global PageRank — drops single-hop QA 5–10 F1, hub-bias on sparse vaults, needs LLM extraction we reject |
-| Temporal | **git history + mtime + frontmatter dates** | Graphiti bi-temporal LLM fact graph — contradicts thesis, drifts from notes, costly per-edit |
-| Context | voyage/native contextual embedding + **deterministic** BM25 blurb | Anthropic Haiku contextual-prefix — double-pays for what the embedder already does, *worse* per Voyage benchmarks |
-| Writes | delegate to Local REST API `/mcp/`; FS fallback | shipping our own CRUD tools — commoditized |
-| MCP SDK | TS SDK v1.x, structured for v2 (Q1 2026) | — |
+| Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
+| Language | **TypeScript** | — |
+| Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
+| Embeddings | **Voyage-4** (`-large` index / `-4` query) online / **bge-m3 via Ollama** offline / OpenAI | Hardcoded Voyage (breaks offline); voyage-context-3 (older, pricier — A/B only) |
+| Reranker | rerank-2.5 online / local cross-encoder (bge-reranker) **in the Node engine** offline | in-renderer rerank — impossible (279–571 MB models, broken transformers.js, plugin policy) |
+| Sentinel judge | **`Judge` interface**: tool-result-as-judge (default, zero-key) / direct-API / local-LLM | **MCP `sampling`** — dead in Claude Code/Desktop, deprecated protocol-wide |
+| First-run config | **config file** (+ plugin settings UI later) | **MCP `elicitation`** — unsupported in flagship clients |
+| Graph | wikilinks as free structure; **bounded 1-hop expansion** via SQL CTE | HippoRAG PPR + global PageRank — hub-bias on sparse vaults, hurts single-hop QA |
+| Temporal | **git history + mtime + frontmatter dates** | Graphiti bi-temporal LLM fact graph — contradicts thesis, drifts, costly |
+| Context | contextual embedding + **deterministic** BM25 blurb | Anthropic Haiku contextual-prefix — redundant + worse |
+| Writes | **our own tools**; FS atomic (temp+fsync+rename); REST only as a headless→live-Obsidian bridge | routing in-process writes through localhost REST; pointing clients at two MCP servers (tool-overlap confusion) |
+| MCP SDK | TS SDK v1.x (≥1.24.0 if HTTP ever used) | — |
 
 ## 4. Architecture
 
 ```
-vaultnexus/  (pnpm + turbo monorepo, pnpm catalog centralizes all dep versions)
-├── packages/
-│   ├── core/      pure-TS, ZERO native deps. compiles to node + browser.
-│   │              chunking · ranking/RRF fusion · wikilink expansion ·
-│   │              Sentinel engine · eval harness · INTERFACES (EmbeddingProvider,
-│   │              VectorStore, Reranker, NLIJudge, VaultSource, Clock)
-│   ├── plugin/    thin Obsidian shell. canonical graph via metadataCache
-│   │              (+ backlink cache), live /active/ context, in-app UI,
-│   │              SERVES MCP over Streamable HTTP on localhost.
-│   └── mcp/       thin stdio shell. headless / CI / Obsidian-closed path.
-│                  filesystem-first indexing. LanceDB backend permitted here.
+vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
+├── src/
+│   ├── core/      pure compute (no I/O): chunking · RRF fusion · wikilink
+│   │              expansion · Sentinel precision stack · eval · INTERFACES
+│   │              (EmbeddingProvider, Reranker, Judge, Clock,
+│   │               VaultReader, VaultWriter, LinkGraphSource)
+│   ├── store/     SQLite (sqlite-vec + FTS5): chunk vectors, BM25, link table,
+│   │              claim table, content-hash cache. Single .db file per vault.
+│   ├── providers/ Voyage / Ollama / OpenAI embeddings; rerank-2.5 / local
+│   │              cross-encoder; Judge backends; local NLI cull
+│   ├── server/    stdio MCP server (tools, resources, instructions)
+│   └── index/     FS walk + chunker + parser + chokidar watcher + hash-cache
 ├── docs/specs/    this document
-└── (README, LICENSE-MIT, .gitignore, turbo.json, pnpm-workspace.yaml)
+└── (README, LICENSE-MIT, .gitignore, pnpm-workspace.yaml, MCPB manifest)
 ```
 
-**Why this shape:** `core` holds the value and stays portable by contract (no native deps → runs in the Electron renderer AND node AND offline). The two shells are thin adapters over `core` interfaces. Clients point at whichever shell is running.
+`core` stays I/O-free and unit-testable; all file/network/persistence is injected through interfaces. This keeps the door open to a future plugin (a second `VaultReader`/`LinkGraphSource` impl) without a rewrite — but we do NOT split packages until that second consumer exists.
 
-### Data stores
-- **Orama** — chunk vectors + BM25 full-text + hybrid RRF. Pure-JS, persists to disk, runs everywhere. Default backend for both shells.
-- **In-memory link graph** — adjacency built from `metadataCache.resolvedLinks` (plugin) or the parser (headless). Rebuilt on load; vaults are small (1k–50k notes). 1-hop expansion is a trivial lookup; deeper traversal via the same structure.
-- **Temporal** — git (`log -p`, `show`) + file mtime + frontmatter dates. No separate temporal DB.
-- *(Optional, behind `VectorStore` interface)* LanceDB for headless huge-vault users; SQLite if relational link queries ever justify it. Not in the default offline path.
-
-### Embedding / rerank / NLI providers (pluggable)
-- **Online (max quality):** Voyage-4 (`voyage-4-large` index / `voyage-4` query, shared Matryoshka space, 1024-dim int8) + `rerank-2.5`.
-- **Offline (default for `--offline`):** Ollama embeddings (e.g. `bge-m3` / `nomic-embed-text`) + local cross-encoder reranker (bge-reranker via Ollama/transformers.js) + local NLI model for the Sentinel.
-- Store `{provider, model, dims, dtype}` with the index; refuse cross-model queries (Voyage shared-space is the one exception).
-- Reuse Smart Connections `.smart-env/` embeddings when present → instant first-run.
+### Data stores (single SQLite file per vault)
+- **sqlite-vec** — chunk embeddings (ANN; int8/Matryoshka to control size).
+- **FTS5** — BM25 full-text; fused with vector via **RRF** (k≈60).
+- **`links` table** — `(src, dst, type, heading, block, alias)`; 1–2 hop expansion via recursive CTE. Built from a markdown parser (headless) or, if a plugin is present, from Obsidian `metadataCache.resolvedLinks` after its `resolved` event (tagged as canonical; never merged with parser output).
+- **`claims` table** — the Claim Index (§6): sentence-grained, deterministic, content-hash-invalidated.
+- **content-hash cache** — re-embed only changed chunks.
+- *Note:* one writer at a time. A heartbeat **lockfile** guards the db; no lock → read-only mode (reads still served). Snapshots/writes are atomic (temp + fsync + rename). sqlite-vec is one native module — document its single prebuilt-binary step for air-gap (unlike LanceDB's 8-platform sprawl, which is why LanceDB is rejected here).
 
 ## 5. Retrieval pipeline
 
 ```
 query
-  → embed(query) → vector search (Orama)  ┐
-  → query terms  → BM25 (Orama)           ┘→ Orama native hybrid RRF → candidate pool
+  → embed(query, input_type=query) → sqlite-vec vector search  ┐
+  → query terms → FTS5 BM25                                     ┘→ RRF → candidate pool
         │
-        ├─ bounded wikilink expansion: 1-hop neighbors of top seeds
-        │     (2-hop only on explicit "explore/related" intent), capped fan-out, deduped
-        │
-        ├─ light structural boosts (small weight): recency (mtime/frontmatter),
-        │     link-overlap-with-seeds, tag-match. NO global PageRank.
-        │
+        ├─ bounded wikilink expansion: 1-hop neighbors of top seeds via SQL CTE
+        │     (2-hop only on explicit "explore/related" intent), capped, deduped
+        ├─ light structural boosts (small weight): recency, link-overlap-with-seeds, tag-match
         └─ rerank (rerank-2.5 online / local cross-encoder offline): ~20–30 in → 5–8 out
-                │
-                └─ return cited hits: { path, heading, blockId?, snippet, score }
+                → cited hits { path, heading, blockId?, snippet, score }
 ```
 
-- **Auto mode-switch:** small/cheap-enough vault → skip RAG, stuff the whole vault into context via prompt caching (retrieval *adds error* below a budget). Gated on a **cost/latency budget**, not a hard token line.
-- **Chunking:** header-split → recursive 256–512 tok, ~10–15% overlap; never split code blocks/tables/callouts. Frontmatter/tags/links/header-path → metadata columns. **Deterministic BM25 blurb** prepended for lexical recall: `title + header-path + tags + linked-note titles` (no LLM).
-- **Incremental index:** per-chunk content hash → re-embed only changed chunks. File watcher (chokidar headless / vault events in plugin), ~400ms debounce. Renames cheap via hash match.
+- **Auto mode-switch:** small/cheap-enough vault → stuff whole vault into context via prompt caching (retrieval adds error below a budget). Gated on a cost/latency **budget**, not a hard token line.
+- **Chunking:** header-split → recursive 256–512 tok, ~10–15% overlap; never split code/tables/callouts. Frontmatter/tags/links/header-path → metadata. **Deterministic BM25 blurb** (`title + header-path + tags + linked-note titles`) — no LLM.
+- **Incremental index:** per-chunk content hash; chokidar watcher, ~400 ms debounce; renames cheap via hash match.
 
 ## 6. The Sentinel (the differentiator)
 
-**Contradiction detection** — on note create/edit:
-1. Retrieve semantically-related prior claims (embeddings — already have).
-2. Cheap **NLI filter** (local model) over candidate sentence/claim pairs → cull 99% of non-contradictions.
-3. **Claude-as-judge** via MCP **sampling** (borrows the client's LLM — no extra key) on the high-confidence survivors.
-4. Surface: *"Conflicts with [[Note]] (Jan 14): 'X'. Reconcile?"* — with exact citations.
+**Contradiction detection** — on note create/edit, or on-demand `sentinel_check`:
+1. **Claim Index lookup** — retrieve semantically-related prior *claims* (sentence-grained, not chunks — chunks are too coarse for pair contradiction).
+2. **Assertion pre-filter** (the biggest precision lever) — only first-person, assertive, settled sentences. Drop questions, quoted/attributed spans (`>` blockquotes, "X said", citations), hedged/hypothetical/draft sentences, and zones the user marked non-settled (`## Counterarguments`, `#draft`/`#fleeting` tags, daily-note free-writing).
+3. **NLI cull** — `Xenova/nli-deberta-v3-small` (Apache-2.0, pre-converted ONNX, via `@huggingface/transformers` v3) as a **high-threshold, recall-oriented filter** — never the arbiter (NLI's documented failure mode is exactly the negation/overlap false positive).
+4. **Judge** (the arbiter) via the **`Judge` interface** — default **tool-result-as-judge** (return candidates as `structuredContent`; the Claude session adjudicates attribution/hypothetical/temporal — zero key, works in every client), or direct-API (frontier, recommended for hard calls), or local-LLM (offline, labeled weaker).
+5. **Temporal reframe** — if the conflicting note is newer, surface as *"You've changed your mind since [[A]] (Jan 14)"*, not "you contradict yourself." Most vault "contradictions" are just learning.
+6. **Confirm-and-learn** — surface as a question with exact citations + one-click *not-a-contradiction / it's-an-update / reconcile*; every dismissal is a stored label that raises the threshold for similar pairs.
 
-**Belief-drift** — for a topic, walk git history + dated notes to show the trajectory of your stance over time (on-demand, over git — no maintained fact graph).
+**Belief-drift** (`recall_history`) — on demand, walk git history + dated notes for a topic, hand the chronology to the Judge to *narrate the arc*. No maintained fact graph. (Frontier judge recommended; local judge is mushier — labeled.)
 
-- Implemented **without** the rejected fact-graph: embeddings + on-demand NLI/judge + git temporal. Cheap, thesis-consistent.
-- **Precision is the product.** A sentinel that fires on paraphrases gets muted in a week. The eval harness's **primary** metric is *false-positive rate on proactive surfacing*, ranked above recall.
+**Precision is the product.** Eval's **primary** metric is *false-positive rate on the user's own vault* (above recall). The demo gate is a measured FP number on Roger's real vault + a "messy notes" negative set, not a cherry-picked hit.
 
-## 7. Ambient layer
+## 7. Standing intelligence
 
-- **Ambient Inbox** — background loop deposits "things your vault noticed" (contradictions, knowledge gaps, stale-but-relevant notes, weekly synthesis) into a dashboard note / daily-note section. Triaged on the user's schedule — no interruptions. Strict notification budget (start weekly, go event-driven only as precision proves out).
-- **Ambient Capture** — Claude Code `Stop`/`SubagentStop` hook feeds the transcript to an extraction pass → distills decisions/insights/gotchas into atomic notes with correct backlinks, into an **opt-in review queue** (no silent writes, no orphan/dup spam). Reuses the Sentinel's dedup.
+- **Epistemic Integrity view** (the standing artifact, novel) — whole-vault map built from the Claim Index + embeddings + NLI + git: clusters of mutually-contradictory claims, least-stable beliefs (most-revised), stale claims (asserted once, never reaffirmed, contradicted by newer notes), drift-vs-convergence per topic. Answers *"where is my thinking weakest / most in flux?"* — same engine as the Sentinel, aimed at the whole vault. A mirror for the structure of your thinking.
+- **Ambient Inbox** — background loop deposits "things your vault noticed" into a dashboard note; triaged on the user's schedule. Strict notification budget; turned on **only after** the FP rate is proven. Needs a non-conversational judge (direct-API / local-LLM).
+- **Ambient Capture** — Claude Code `Stop` hook distills decisions/insights into atomic notes (correct backlinks, dedup via Claim Index), into an **opt-in review queue** — no silent writes.
 
 ## 8. MCP surface
 
-Transport: **Streamable HTTP** (plugin) + **stdio** (headless). All tools: `outputSchema` + `structuredContent`, correct `readOnlyHint`/`destructiveHint`. Server `instructions` (≤2KB) front-loaded (Claude Code defers MCP tools → discovery depends on it). Uses **sampling** (Sentinel judge, synthesis) and **elicitation** (first-run config: provider, key, vault path).
+Transport: **stdio** (no HTTP → no DNS-rebinding exposure). All tools: `outputSchema` + `structuredContent`, correct `readOnlyHint`/`destructiveHint`. Server `instructions` (≤2 KB) front-loaded (Claude Code defers MCP tools → discovery depends on it). **No reliance on `sampling`/`elicitation`** (unsupported in flagship clients).
 
-**Read** (`readOnlyHint`): `semantic_search`, `note_context` (flagship: note + out/back-links + neighbors + tags), `what_links_here`, `recall_history` (git temporal — "what did I think about X in March"), `vault_diff`, `vault_stats`. *(P2: `note_ripple`, `graph_query`, `tag_map`, `moc_map`.)*
+**Read** (`readOnlyHint`): `semantic_search`, `note_context` (flagship), `what_links_here`, `recall_history` (git temporal), `vault_diff`, `vault_stats`, `sentinel_check`, `epistemic_report`. *(P2: `note_ripple`, `graph_query`, `tag_map`, `moc_map`.)*
 
-**Write** (dry-run + `elicit` confirm; delegate to REST `/mcp/` when Obsidian open, FS when closed): `create_note`, `edit_note`, `safe_rename_note` (rewrites every backlink/alias/embed). *(P2: `suggest_links`, `synthesize_moc`.)*
+**Write** (dry-run + confirm; **our own tools**, FS atomic writes; REST bridge only when a headless run targets a live Obsidian): `create_note`, `edit_note`, `safe_rename_note` (rewrites every backlink/alias/embed). *(P2: `suggest_links`, `synthesize_moc`.)*
 
-**Sentinel:** `sentinel_check` (on demand for a note/claim), `sentinel_review` (triage the inbox).
+**Resources:** `note://{path}` + `vault://index`; `listChanged` on create/delete.
 
-**Resources:** `note://{path}` (template, `@`-mentionable) + `vault://index`; `listChanged` on create/delete.
+**Future plugin (P2) security:** if it ever serves MCP over HTTP, pin TS SDK ≥1.24.0 (or apply `hostHeaderValidation`), bind loopback only, validate Origin/Host, require a bearer token on every request (GHSA-w48q-cv73-mx4w). Not applicable to the stdio engine.
 
 ## 9. Offline build & dependency centralization
 
-- **Pure-JS/TS only** — no native compilation in the default path (Orama, transformers.js, graphology are all pure-JS). Native LanceDB lives only in the optional headless backend, never required.
-- **pnpm workspace + catalog** — `pnpm-workspace.yaml` `catalog:` pins every dependency version in one place; packages reference `catalog:`.
-- **Committed `pnpm-lock.yaml`**; `pnpm install --offline` works against a warm store. Document populating the store (`pnpm fetch`) and an optional vendored `node_modules` tarball for air-gapped builds.
-- **Offline runtime** — `--offline` selects Ollama embeddings + local reranker + local NLI; document one-time `ollama pull` of the required models. Zero network calls at query time in offline mode.
-- **Secrets** — Voyage/OpenAI keys via env (`VOYAGE_API_KEY`), never committed; `.gitignore` covers index sidecars + `.env`.
-- **One-command build** — `pnpm install && pnpm build` from a clean checkout, no external services for the offline path.
+Three distinct "offline"s, handled separately (the v1 spec conflated them):
+
+1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `pnpm install --offline` against a warm/vendored store, on a **pinned pnpm version** (dodges the 10.12.2 offline regression). CI runs `pnpm install --offline` from a cold store on a **different arch** than `fetch` ran — the only real proof. sqlite-vec is the one native dep: pre-fetch its prebuilt binary for the target platform; LanceDB rejected partly to avoid 8-platform native sprawl.
+2. **Offline engine runtime** — embeddings via **bge-m3 in Ollama** (a separate localhost daemon — state this plainly); reranker + NLI via local ONNX **in the Node engine** (never a renderer). Air-gap models: tar `~/.ollama/models` from a connected box + vendor the ONNX NLI/reranker weights to a cache dir (nothing GB-scale enters git or the bundle). Engine makes **zero network calls** at query time in offline mode.
+3. **Honest quality gap** — offline embeddings (bge-m3) ≈ 2–3 NDCG below Voyage-4; offline judge (local LLM) is materially weaker at belief discrimination (label it). With the local reranker present the gap is small; without it, offline = hybrid-only (degraded), surfaced as a `−rerank` eval config.
+
+**Distribution:** **MCPB bundle** with vendored `node_modules` = primary + air-gappable (Node ships inside Claude Desktop/Code). `npx -y @vaultnexus/mcp` = online convenience only (not air-gappable). `claude mcp add --transport stdio -- …` for dev.
+
+**Secrets:** keys via env (`VOYAGE_API_KEY`), never committed; `.gitignore` covers the `.db`, model caches, `.env`.
 
 ## 10. Explicitly rejected (kept for the record)
 
-- **Persistent bi-temporal LLM fact graph** — contradicts the "wikilinks are the graph" thesis, drifts from notes, costly per-edit. Git gives real bitemporality free.
-- **HippoRAG PPR + global PageRank** — hurts dominant single-hop queries, hub-bias on sparse vaults.
-- **Anthropic Haiku contextual-prefix** — redundant with (and worse than) the contextual embedder.
-- **RAPTOR / GraphRAG community summaries / ColBERT / Ebbinghaus resurfacing** — heavyweight, low marginal value for single-user; defer or never.
-- **Forking `cyanheads/obsidian-mcp-server`** — reimplement its edit-tool *semantics* as a reference (Apache-2.0), don't vendor its framework.
+- **Persistent bi-temporal LLM fact graph** — contradicts the thesis, drifts, costly. *Distinct from the Claim Index, which is sentence-grained, deterministic, non-LLM, rebuildable — the same kind of derived/disposable artifact as the link graph. The Claim Index is restored; the fact graph stays dead.*
+- **HippoRAG PPR + global PageRank** — hub-bias on sparse vaults, hurts single-hop.
+- **Anthropic Haiku contextual-prefix** — redundant with, and worse than, the contextual embedder.
+- **MCP `sampling` / `elicitation`** — unsupported in Claude Code/Desktop, sampling deprecated protocol-wide.
+- **Plugin-first / monorepo (now)** — over-rotated; renderer can't host models; reverts to one headless package, plugin as P2.
+- **Orama / LanceDB as default store** — Orama: 512 MB ceiling, no locking; LanceDB: native-binding sprawl breaks air-gap + can't load in a renderer.
+- **Routing in-process writes through REST; two MCP servers to the client** — write contradiction + tool-overlap confusion.
+- **RAPTOR / GraphRAG community summaries / ColBERT / Ebbinghaus resurfacing** — low marginal value for single-user; defer or never.
+- **Forking `cyanheads/obsidian-mcp-server`** — vendor its edit-tool *module* (Apache-2.0) as reference; don't fork as skeleton.
 
 ## 11. Evaluation
 
-- Golden **Q→note** set bootstrapped from the user's own vault (LLM reads a note → generates a question it answers). 25–100 pairs to start.
-- Retrieval: Recall@k, MRR, **NDCG@10** (comparable to Voyage's published numbers).
-- A/B switchboard across configs (dense / +BM25 / +expansion / +rerank) → the failure-rate ladder that *proves* each addition before it ships.
-- **Sentinel: false-positive rate is the primary metric.** Plus contradiction recall on a hand-built set.
+- Golden **Q→note** set from the user's own vault; Recall@k, MRR, **NDCG@10**.
+- A/B switchboard (dense / +BM25 / +expansion / +rerank) → the failure-rate ladder that *proves* each addition.
+- **Sentinel: false-positive rate is the primary metric**, with a "messy notes" negative set (quotes, questions, hypotheticals, paraphrases). Per-vault NLI-threshold + assertion-filter calibration. Contradiction recall on a hand-built set secondary.
+- Every eval run records the active graph source (canonical vs parser) → reproducible.
 
 ## 12. Phasing
 
-- **P0 — scaffold:** monorepo, pnpm catalog, `core` interfaces, Obsidian-correct parser + metadataCache path, config/elicitation, offline-build setup, CI.
-- **P1 — retrieval base (ships fast, already category-leading):** Orama hybrid index + incremental hash-cache, `semantic_search` / `note_context` / `what_links_here` / `create_note` / `edit_note`, rerank, eval harness, plugin shell + HTTP MCP, Voyage-4 + Ollama-local providers.
-- **P1.5 — the differentiator (novel-first):** 🎯 Sentinel (contradiction + belief-drift) + Ambient Inbox + `recall_history` + `safe_rename_note`.
-- **P2:** Ambient Capture, gardening (`suggest_links` / orphan / `synthesize_moc`), knowledge-gap detection, headless stdio shell + MCPB bundle, remaining read tools, selective agentic escalation.
-- **P3 / moonshot:** learned per-user fusion weights, cross-source life-graph (vault + GitNexus code-graph + read-later), multimodal "see-the-graph" reasoning.
+- **P0 — scaffold:** Node package, pnpm catalog, SQLite + sqlite-vec + FTS5, `core` interfaces, FS parser + chunker, config file, CI (incl. cold-store cross-arch offline build). **Prove-it-early spikes:** validate the NLI ONNX model runs end-to-end in Node, and each embedding provider round-trips.
+- **P1 — retrieval base (ships fast, already category-leading):** incremental hash-cache index, `semantic_search` / `note_context` / `what_links_here` / `create_note` / `edit_note` (FS atomic), rerank, **Claim Index**, eval harness (incl. FP negative set), stdio MCP server, Voyage-4 + Ollama-bge-m3 providers + local reranker.
+- **P1.5 — the differentiator:** 🎯 Sentinel (`sentinel_check`: claim lookup → assertion filter → NLI cull → tool-result-judge → temporal reframe → confirm-loop), `recall_history`, `safe_rename_note`.
+- **P2:** **Epistemic Integrity** standing view, Ambient Inbox (after FP proven) + direct-API/local judge, Ambient Capture (Stop hook), gardening (`suggest_links`/orphan/`synthesize_moc`), MCPB bundle, **optional Obsidian plugin** (canonical graph + live `/active/` context + settings UI), remaining read tools.
+- **P3 / moonshot:** cross-source life-graph (vault + GitNexus code-graph + read-later), learned per-user fusion weights, multimodal "see-the-graph" reasoning.
 
 ## 13. Open questions
 
-- Default offline embedding model (`bge-m3` vs `nomic-embed-text`) — decide via eval on a sample vault.
-- Vault path + whether it's git-backed (enables temporal features) — from user at first run via elicitation.
-- Plugin distribution: Obsidian community review vs BRAT beta channel for early releases.
+- Offline embedding model: **bge-m3** is the leading default (1024-dim, multilingual, Apache-2.0, sparse+dense) — confirm via eval on a sample vault.
+- NLI model size/quality tradeoff: `nli-deberta-v3-small` (Apache-2.0, pre-converted) default; validate ONNX runtime early (known DeBERTa-v3 export gremlins).
+- Vault path + git-backed? (enables temporal/drift) — from config at first run.
+- sqlite-vec vault-size ceiling vs a pure-JS fallback — measure; document the crossover.
+- Headless graph parity vs `metadataCache` — measure divergence on a sample vault; document the known-unequal cases (shortest-path, case-fold, embeds).
