@@ -489,3 +489,23 @@ pnpm vitest run test/eval/real-embedder.test.ts     # gated test now RUNS → mu
 - **Type consistency:** `GoldQuery{query,relevant}` defined in `gold.ts`, consumed identically in harness/run/tests. `EvalResult`/`PerQuery` defined in harness, consumed in run. `recallAtK/ndcgAtK/reciprocalRank` signatures `(string[], Set<string>, k?)` consistent across metrics + harness. `selectEmbedder()` reads `VAULTNEXUS_EMBED_*` (existing) — matches the env mapping in T6 and the gate in T5.
 - **Offline safety:** real test `skipIf(!hasReal)` → default suite unaffected; runner gate inert unless `VAULTNEXUS_EVAL_MIN_RECALL>0`.
 - **Secret hygiene:** key only via env, never committed, never printed by runner (prints embedder class + dims only).
+
+---
+
+## Results (run 2026-05-23, Voyage `/v1/embeddings`, 1024-dim, 8-note corpus, 12 paraphrase queries)
+
+| metric | FakeEmbedder (baseline) | voyage-code-3 | **voyage-3-large** |
+|---|---|---|---|
+| recall@1 | 0.250 | 0.875 | **0.958** |
+| recall@3 | 0.500 | 1.000 | **1.000** |
+| recall@10 | 0.542 | 1.000 | **1.000** |
+| nDCG@10 | 0.417 | 0.958 | **1.000** |
+| MRR | 0.378 | 0.944 | **1.000** |
+
+**Conclusion:** the hybrid (vector⊕FTS5⊕RRF) retrieval stack works excellently on real semantics. `voyage-3-large` ranks a relevant note **#1 on every query** (recall@1=0.958 is the lone 2-relevant query where only one note can hold #1; MRR=1.000). Semantic lift over the non-semantic baseline: **recall@1 +0.71, MRR +0.62** — unambiguous. Gated test `real-embedder.test.ts` PASSES with these (floor recall@1≥0.8, lift>+0.3).
+
+**recall@10 saturates to 1.000** on this corpus (only 8 docs, modern embeddings anisotropic → all cosines positive) → it proves nothing here; **recall@1 / MRR carry the conclusion** (rank-sensitive, corpus-size-immune). This is why the harness reports recall@1.
+
+**Model choice:** `voyage-3-large` > `voyage-code-3` for prose (code model missed the CAP-theorem paraphrase, ranking it #3). Use `voyage-3-large` for the prose-note default; `voyage-code-3` only for code-heavy vaults.
+
+**Levers NOT yet needed (recall@1 already 0.958):** weighted-RRF, Voyage `input_type` query/document asymmetry, chunk-granularity tuning. Re-measure here if a larger/harder corpus drops recall@1.
