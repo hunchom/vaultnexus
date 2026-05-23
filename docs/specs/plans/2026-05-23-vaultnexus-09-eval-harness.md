@@ -494,18 +494,20 @@ pnpm vitest run test/eval/real-embedder.test.ts     # gated test now RUNS → mu
 
 ## Results (run 2026-05-23, Voyage `/v1/embeddings`, 1024-dim, 8-note corpus, 12 paraphrase queries)
 
-| metric | FakeEmbedder (baseline) | voyage-code-3 | **voyage-3-large** |
+Gold set hardened after review: all 12 queries share **no distinctive token** with their target note (stopwords only) → FTS5 keyword match cannot answer them, the **vector half must do the retrieving**. Labels are human-unambiguous (one clearly-best note, except 1 deliberately 2-relevant query).
+
+| metric | FakeEmbedder (lexical baseline) | voyage-3.5 | **voyage-3-large** |
 |---|---|---|---|
-| recall@1 | 0.250 | 0.875 | **0.958** |
-| recall@3 | 0.500 | 1.000 | **1.000** |
-| recall@10 | 0.542 | 1.000 | **1.000** |
-| nDCG@10 | 0.417 | 0.958 | **1.000** |
-| MRR | 0.378 | 0.944 | **1.000** |
+| recall@1 | 0.500 | 0.875 | **0.958** |
+| recall@3 | 0.667 | 1.000 | **1.000** |
+| recall@10 | 0.708 | 1.000 | **1.000** |
+| nDCG@10 | 0.625 | 0.963 | **1.000** |
+| MRR | 0.600 | 0.958 | **1.000** |
 
-**Conclusion:** the hybrid (vector⊕FTS5⊕RRF) retrieval stack works excellently on real semantics. `voyage-3-large` ranks a relevant note **#1 on every query** (recall@1=0.958 is the lone 2-relevant query where only one note can hold #1; MRR=1.000). Semantic lift over the non-semantic baseline: **recall@1 +0.71, MRR +0.62** — unambiguous. Gated test `real-embedder.test.ts` PASSES with these (floor recall@1≥0.8, lift>+0.3).
+**Conclusion:** the hybrid (vector⊕FTS5⊕RRF) retrieval stack works excellently on real semantics. `voyage-3-large` ranks a relevant note **#1 on every query** (recall@1=0.958 is the lone 2-relevant query where only one note can hold #1; MRR=1.000, nDCG@10=1.000). **FakeEmbedder is NOT random — it is an FNV bag-of-tokens random-projection ≈ a crude lexical baseline.** So this is *semantic model vs lexical baseline* (a harder, more honest bar than vs random): lift **recall@1 +0.46, MRR +0.40**. Gated test `real-embedder.test.ts` PASSES (floor recall@1≥0.8, lift>+0.3).
 
-**recall@10 saturates to 1.000** on this corpus (only 8 docs, modern embeddings anisotropic → all cosines positive) → it proves nothing here; **recall@1 / MRR carry the conclusion** (rank-sensitive, corpus-size-immune). This is why the harness reports recall@1.
+**recall@10 saturates to ~1.0** on this corpus (only 8 docs, modern embeddings anisotropic → cosines positive) → proves little; **recall@1 / MRR carry the conclusion** (rank-sensitive, corpus-size-immune). Hence the harness reports recall@1.
 
-**Model choice:** `voyage-3-large` > `voyage-code-3` for prose (code model missed the CAP-theorem paraphrase, ranking it #3). Use `voyage-3-large` for the prose-note default; `voyage-code-3` only for code-heavy vaults.
+**Model:** `voyage-3-large` (best prose) > `voyage-3.5` > `voyage-code-3` (code model, weaker on prose). Default `voyage-3-large`.
 
 **Levers NOT yet needed (recall@1 already 0.958):** weighted-RRF, Voyage `input_type` query/document asymmetry, chunk-granularity tuning. Re-measure here if a larger/harder corpus drops recall@1.

@@ -31,5 +31,6 @@ describe('runEval', () => {
       { query: 'completely unrelated nonexistent words xyzzy', relevant: ['cats.md'] },
     ], 5);
     expect(r.perQuery[0].recall).toBe(0);
+    expect(r.perQuery[0].rankedNotes).not.toContain('cats.md'); // filtered (score≤0), not merely ranked low
   });
 });

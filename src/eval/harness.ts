@@ -22,7 +22,8 @@ export interface EvalResult {
   perQuery: PerQuery[];
 }
 
-/** Dedupe note paths preserving first-seen order; drop non-positive-cosine hits (relevance floor). */
+/** Dedupe note paths preserving first-seen order; drop non-positive-cosine hits (relevance floor).
+ *  Asymmetry note: Fake's random vecs hit ≤0 more than a real model's → slightly widens real-vs-Fake gap. Sound: cosine≤0 = irrelevant. */
 function rankedNotes(hits: { notePath: string; score: number }[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -40,7 +41,7 @@ export async function runEval(corpusDir: string, embedder: Embedder, queries: Go
 
   const perQuery: PerQuery[] = [];
   for (const q of queries) {
-    const hits = await idx.query(q.query, k * 4); // over-fetch chunks → dedupe to notes
+    const hits = await idx.query(q.query, k * 4); // over-fetch chunks → dedupe to notes (4× covers ≤4 chunks/note at this k)
     const ranked = rankedNotes(hits);
     const rel = new Set(q.relevant);
     perQuery.push({
@@ -54,8 +55,8 @@ export async function runEval(corpusDir: string, embedder: Embedder, queries: Go
     queries: perQuery.length,
     recallAt1: mean((p) => p.recall1),
     recallAt3: mean((p) => recallAtK(p.rankedNotes, new Set(p.relevant), 3)),
-    recallAt10: mean((p) => p.recall),
-    ndcgAt10: mean((p) => p.ndcg),
+    recallAt10: mean((p) => recallAtK(p.rankedNotes, new Set(p.relevant), 10)), // fixed @10, independent of fetch k
+    ndcgAt10: mean((p) => ndcgAtK(p.rankedNotes, new Set(p.relevant), 10)),
     mrr: mean((p) => p.rr),
     perQuery,
   };

@@ -5,7 +5,12 @@ import { selectEmbedder } from '../daemon/select-embedder.js';
 import { runEval } from './harness.js';
 import { GOLD_QUERIES } from './gold.js';
 
-const THRESHOLD = Number(process.env.VAULTNEXUS_EVAL_MIN_RECALL ?? 0); // gate recall@1 when >0
+const rawMin = process.env.VAULTNEXUS_EVAL_MIN_RECALL;
+const THRESHOLD = Number(rawMin ?? 0); // gate recall@1 when >0
+if (rawMin !== undefined && Number.isNaN(THRESHOLD)) {
+  process.stderr.write(`eval: VAULTNEXUS_EVAL_MIN_RECALL='${rawMin}' is not a number\n`);
+  process.exit(1);
+}
 
 async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
