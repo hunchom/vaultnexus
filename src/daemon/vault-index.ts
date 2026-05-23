@@ -5,6 +5,7 @@ import { calibrateScale, quantize } from '../core/quantize.js';
 import { search } from '../core/search.js';
 import { FtsIndex } from './fts.js';
 import { fuseRRF } from '../core/fusion.js';
+import { extractWikilinks } from '../core/wikilinks.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -29,6 +30,7 @@ export class VaultIndex {
   private flatF32: Float32Array | null = null;
   private scale = 1;
   private readonly fts = new FtsIndex();
+  private readonly noteLinks = new Map<string, string[]>(); // notePath → bare wikilink targets
 
   constructor(private readonly embedder: Embedder) {}
 
@@ -41,6 +43,7 @@ export class VaultIndex {
     // tokenBudget:0 → one block per paragraph (paragraph = retrieval unit)
     const blocks = chunkDocument(source, { tokenBudget: 0 }).filter((c) => c.granularity === 'block');
     if (blocks.length === 0) return;
+    this.noteLinks.set(notePath, extractWikilinks(source));
     const vecs = await this.embedder.embed(blocks.map((b) => b.text));
     blocks.forEach((b, i) => {
       const id = this.chunks.length;
@@ -50,6 +53,11 @@ export class VaultIndex {
     });
     this.dims = this.f32[0].length;
     this.flatInt8 = null; // new data → rebuild flat store on next query
+  }
+
+  /** Indexed notes with their bare wikilink targets (for graph build). */
+  private noteList(): Array<{ path: string; links: string[] }> {
+    return [...this.noteLinks.entries()].map(([path, links]) => ({ path, links }));
   }
 
   private build(): void {
