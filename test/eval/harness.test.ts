@@ -20,7 +20,8 @@ describe('runEval', () => {
       { query: 'lazy hounds sleep all day', relevant: ['dogs.md'] },
     ], 5);
     expect(r.queries).toBe(2);
-    expect(r.recallAt10).toBeCloseTo(1); // exact text → Fake nails both
+    expect(r.recallAt1).toBeCloseTo(1); // exact text → relevant note ranked #1
+    expect(r.recallAt10).toBeCloseTo(1);
     expect(r.mrr).toBeCloseTo(1);
     expect(r.perQuery[0].rankedNotes[0]).toBe('cats.md');
   });
