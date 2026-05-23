@@ -1,9 +1,10 @@
+#!/usr/bin/env node
 import { createServer, type Socket } from 'node:net';
 import { existsSync, rmSync } from 'node:fs';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
 import { defaultSocketPath, defaultLockPath } from '../core/paths.js';
-import { acquireSingleInstanceLock } from './lock.js';
+import { acquireSingleInstanceLock, lockFailureMessage } from './lock.js';
 import { createMcpServer } from './mcp-server.js';
 import { SocketServerTransport } from './socket-transport.js';
 import { createHttpApp } from './http.js';
@@ -13,9 +14,15 @@ async function main(): Promise<void> {
   const lockPath = defaultLockPath();
   const httpPort = Number(process.env.VAULTNEXUS_HTTP_PORT ?? 38473);
 
+  // Forward-ref: reassigned to full handler after servers start.
+  let shutdown: () => Promise<void> = async () => process.exit(1);
+
   // single-writer guard → exit 1 if another daemon holds the lock
-  const release = await acquireSingleInstanceLock(lockPath).catch((): never => {
-    process.stderr.write('vaultnexus: another daemon is already running\n');
+  const release = await acquireSingleInstanceLock(lockPath, (err) => {
+    process.stderr.write(`vaultnexus: lock compromised ${err.message}\n`);
+    void shutdown();
+  }).catch((err): never => {
+    process.stderr.write(lockFailureMessage(err));
     process.exit(1);
   });
 
@@ -25,7 +32,9 @@ async function main(): Promise<void> {
   const socketServer = createServer((socket: Socket) => {
     const transport = new SocketServerTransport(socket);
     const mcp = createMcpServer();
-    void mcp.connect(transport);
+    mcp.connect(transport).catch((e) =>
+      process.stderr.write(`vaultnexus: connection failed ${String(e)}\n`),
+    );
   });
   await new Promise<void>((resolve) => socketServer.listen(socketPath, resolve));
 
@@ -35,9 +44,14 @@ async function main(): Promise<void> {
     port: httpPort,
   });
 
-  const shutdown = async (): Promise<void> => {
-    socketServer.close();
-    http.close();
+  // Promisify server closes so cleanup completes before exit.
+  const closeSocketServer = (): Promise<void> =>
+    new Promise<void>((resolve) => socketServer.close(() => resolve()));
+  const closeHttp = (): Promise<void> =>
+    new Promise<void>((resolve) => http.close(() => resolve()));
+
+  shutdown = async (): Promise<void> => {
+    await Promise.all([closeSocketServer(), closeHttp()]).catch(() => {/* still clean up */});
     if (existsSync(socketPath)) rmSync(socketPath);
     await release();
     process.exit(0);

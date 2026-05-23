@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { connect } from 'node:net';
 import { defaultSocketPath } from '../core/paths.js';
 
