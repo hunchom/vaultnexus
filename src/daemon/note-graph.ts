@@ -5,7 +5,7 @@ import louvainMod from 'graphology-communities-louvain';
 // under NodeNext esModuleInterop the default-import callable shape is preserved via this cast.
 const louvain = louvainMod as unknown as (graph: UndirectedGraph, options?: Record<string, unknown>) => Record<string, number>;
 
-/** Resolve bare wikilink target → note path by basename (case-insensitive). */
+/** Resolve bare wikilink target → note path by basename (case-insensitive). First-match on dup basenames (Obsidian: shortest-path; good enough). */
 export function resolveLink(target: string, paths: string[]): string | undefined {
   const t = target.toLowerCase();
   return paths.find((p) => p.slice(p.lastIndexOf('/') + 1).replace(/\.md$/i, '').toLowerCase() === t);

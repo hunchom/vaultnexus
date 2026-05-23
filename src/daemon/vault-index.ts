@@ -82,6 +82,7 @@ export class VaultIndex {
     const f = this.flatF32!;
     const d = this.dims;
     const notes = this.noteList();
+    // every chunk.notePath ∈ noteLinks (addNote sets it past the empty-blocks guard) → ∈ comm
     const comm = detectCommunities(buildNoteGraph(notes));
     const paths = notes.map((nt) => nt.path);
     const key = (p: string, q: string) => (p < q ? `${p} ${q}` : `${q} ${p}`);
