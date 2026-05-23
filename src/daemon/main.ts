@@ -64,6 +64,8 @@ async function main(): Promise<void> {
   shutdown = async (): Promise<void> => {
     await Promise.all([closeSocketServer(), closeHttp()]).catch(() => {/* still clean up */});
     if (existsSync(socketPath)) rmSync(socketPath);
+    const e = embedder as { close?: () => void };
+    if (typeof e.close === 'function') e.close(); // release cache db handle
     await release();
     process.exit(0);
   };
