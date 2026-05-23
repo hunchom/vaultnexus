@@ -25,7 +25,7 @@ digraph VaultNexus {
     idx   [label="Indexer\nwatch→parse→chunk→\nembed→Claim Index", fillcolor="#f2fff6"];
     ret   [label="Retriever\nhybrid RRF→expand→\nrerank→cited", fillcolor="#f2fff6"];
     sen   [label="Sentinel\ncull→assert→Judge→\nreframe→learn", fillcolor="#f2fff6"];
-    store [label="SQLite (1 file)\nsqlite-vec·FTS5·links·\nclaims·labels·cache",
+    store [label="Postgres+pgvector (MVCC)\nvectors·FTS·links·claims·\nlabels·cache  (sqlite fallback)",
            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
     {rank=same; idx; ret; sen;}
   }
