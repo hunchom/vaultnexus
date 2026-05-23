@@ -1,69 +1,146 @@
 digraph VaultNexus {
   rankdir=TB; bgcolor="white"; compound=true;
-  graph [dpi=200, fontname="Helvetica-Bold", fontsize=16, labeljust="l", margin=14, ranksep=0.85, nodesep=0.5];
-  node  [fontname="Helvetica", fontsize=13, shape=box, style="rounded,filled", penwidth=1.2, color="#888888", fillcolor="#ffffff", margin="0.16,0.09"];
+  graph [dpi=200, fontname="Helvetica-Bold", fontsize=16, labeljust="l",
+         margin=18, ranksep=1.1, nodesep=0.55];
+  node  [fontname="Helvetica", fontsize=13, shape=box, style="rounded,filled",
+         penwidth=1.2, color="#888888", fillcolor="#ffffff", margin="0.18,0.10"];
   edge  [fontname="Helvetica", fontsize=11, color="#555555"];
 
-  /* ---- CLIENTS (top row) ---- */
+  /* THIN CLIENTS */
   subgraph cluster_clients {
     label="THIN CLIENTS  ·  zero embed / index / search";
     style="rounded,filled"; color="#9cc7f0"; fillcolor="#eaf4ff"; fontcolor="#0b4a82";
-    cc    [label="Claude Code\nstdio shim"];
-    obs   [label="Obsidian\nthin plugin · 60fps"];
-    other [label="Desktop / Cursor\nHTTP-MCP"];
+    fontsize=15;
+    cc    [label="Claude Code\nstdio self-bridge → Unix socket\n(~40-line shim)"];
+    obs   [label="Obsidian  thin plugin\nloopback HTTP · 60fps · zero compute"];
+    other [label="Claude Desktop / Cursor\nHTTP-MCP"];
     {rank=same; cc; obs; other;}
   }
 
-  ipc [label="IPC  ·  Unix socket (default)  +  loopback HTTP (hardened)",
-       shape=note, fillcolor="#fff7d6", color="#e0c200", fontsize=12];
+  /* IPC layer */
+  ipc [label="Unix domain socket  (default · 130µs · no network surface)\n+  loopback HTTP  (hardened: 127.0.0.1 · Origin allowlist · bearer token)",
+       shape=note, fillcolor="#fff7d6", color="#e0c200", fontsize=12,
+       margin="0.22,0.12"];
 
-  /* ---- ENGINE (middle) ---- */
+  /* ENGINE */
   subgraph cluster_engine {
-    label="VAULTNEXUS ENGINE  (daemon)  ·  100% CPU  ·  SINGLE WRITER";
+    label="VAULTNEXUS ENGINE  (daemon · 100% CPU · SINGLE WRITER)";
     style="rounded,filled"; color="#74c98c"; fillcolor="#e9fbef"; fontcolor="#0d5a2a";
-    mcp   [label="MCP surface\ntools · resources", fillcolor="#f2fff6"];
-    idx   [label="Indexer\nwatch→parse→chunk→\nembed→Claim Index", fillcolor="#f2fff6"];
-    ret   [label="Retriever\nhybrid RRF→expand→\nrerank→cited", fillcolor="#f2fff6"];
-    sen   [label="Sentinel\ncull→assert→Judge→\nreframe→learn", fillcolor="#f2fff6"];
-    store [label="Postgres+pgvector (MVCC)\nvectors·FTS·links·claims·\nlabels·cache  (sqlite fallback)",
-           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
-    {rank=same; idx; ret; sen;}
+    fontsize=15;
+
+    mcp   [label="MCP surface\ntools · resources · streaming notifications",
+           fillcolor="#f2fff6"];
+
+    idx   [label="Indexer\nwatch → parse → hierarchical chunk\n[sentence / chunk / note] → embed\n→ Claim Index  +  kNN graph",
+           fillcolor="#f2fff6"];
+
+    ret   [label="Retriever — ADAPTIVE CASCADE\nrouter → CC/TMM fusion → confidence gate\n→ GAR/RGS expansion → DPP → adaptive-k",
+           fillcolor="#f2fff6"];
+
+    conv  [label="Convergence / Bridge engine\nHEADLINE · FP-safe · Bayesian-surprise\n(claim-level epistemic bridging)",
+           fillcolor="#f2fff6"];
+
+    sen   [label="Sentinel  (opt-in · pull-only)\nBelief-Energy  H=Σω|bᵢ−bⱼ|\nwinkNLP negation · BOCPD drift",
+           fillcolor="#f2fff6"];
+
+    ledger [label="Decision & Prediction Ledger\nBrier calibration · per-topic scores",
+            fillcolor="#f2fff6"];
+
+    sleep [label="Sleep-time consolidation\nidle → morning brief\n(Bayesian-surprise-ranked syntheses)",
+           fillcolor="#f2fff6"];
+
+    rcu   [label="RCU lock-free cache\n+  predictive slow-thinker prefetch",
+           fillcolor="#f2fff6"];
+
+    {rank=same; idx; ret; conv;}
+    {rank=same; sen; ledger;}
   }
 
-  /* ---- EXTERNAL APIs (below engine) ---- */
-  subgraph cluster_ext {
-    label="PROVIDER REGISTRY  ·  any vendor · local OR API · bring-what-you-have";
+  /* LEAN STORE */
+  subgraph cluster_store {
+    label="LEAN STORE  (install-nothing default)";
+    style="rounded,filled"; color="#a86fd8"; fillcolor="#f8f2ff"; fontcolor="#4a1580";
+    fontsize=15;
+
+    sv    [label="sqlite-vec / vectorlite  +  FTS5 bm25()",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    ssmd  [label="simsimd binary brute-force\n(NO ANN at ≤1M · ~1ms@8-core)",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    usrch [label="usearch  kNN adjacency graph\n(expansion + convergence edges)",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    lmdb  [label="LMDB\nCSR wikilink graph · Claim Index · cache",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+
+    pgopt [label="Postgres + pgvectorscale + pg_search\n(opt-in PG_URL only · AGPL · your server)",
+           shape=cylinder, fillcolor="#ede9ff", color="#7a56c8", style="dashed,filled"];
+
+    {rank=same; sv; ssmd; usrch; lmdb;}
+  }
+
+  /* PROVIDER REGISTRY */
+  subgraph cluster_reg {
+    label="PROVIDER REGISTRY  ·  3 model-agnostic roles  ·  bring-what-you-have";
     style="rounded,filled"; color="#f0a875"; fillcolor="#fff1e8"; fontcolor="#9a4a16";
-    emb   [label="1. Embedding model\n(required)\nGemini·Nomic·Gemma·local…", fillcolor="#fff8f2"];
-    rr    [label="2. Reranker\n(optional → skip)\nVoyage·Cohere·zerank…", fillcolor="#fff8f2"];
-    judge [label="3. LLM / Judge\n(host session or yours)\nClaude·GPT·Gemini·local", fillcolor="#fff8f2"];
+    fontsize=15;
+
+    emb   [label="1.  Embedding model  (required)\ncontextual if supported · resident-local option\ncapability probe + vault micro-benchmark router",
+           fillcolor="#fff8f2"];
+    rr    [label="2.  Reranker  (optional → graceful skip)\nown ~150-LOC undici client\nVoyage · Cohere · Jina · local",
+           fillcolor="#fff8f2"];
+    judge [label="3.  LLM / Judge\nhost session zero-key  OR  any model\ncascade cheap→frontier · AI SDK v6 (chat/judge only)",
+           fillcolor="#fff8f2"];
     {rank=same; emb; rr; judge;}
   }
 
-  /* ---- VAULT (bottom) ---- */
+  /* VAULT */
   subgraph cluster_vault {
     label="VAULT  ·  local · your data";
     style="rounded,filled"; color="#b5b5b5"; fillcolor="#f2f2f2"; fontcolor="#333333";
+    fontsize=15;
     md  [label="*.md", shape=folder];
     git [label="git history", shape=folder];
     {rank=same; md; git;}
   }
 
-  /* ---- spine (vertical) ---- */
-  cc -> ipc; obs -> ipc; other -> ipc;
-  ipc -> mcp;
-  mcp -> idx; mcp -> ret; mcp -> sen;
-  idx -> store; ret -> store [dir=both]; sen -> store [dir=both];
-  store -> emb [style=invis];           /* push external below engine */
+  /* ---- vertical spine ---- */
+  cc    -> ipc;
+  obs   -> ipc;
+  other -> ipc;
+  ipc   -> mcp;
 
-  /* ---- engine -> external ---- */
-  idx -> emb [label="embed"];
-  ret -> rr  [label="top-30"];
-  sen -> judge [label="adjudicate"];
+  mcp   -> idx;
+  mcp   -> ret;
+  mcp   -> conv;
+  mcp   -> sen;
+  mcp   -> ledger;
+  mcp   -> sleep;
 
-  /* ---- vault (bottom, back-edges don't reshape ranks) ---- */
-  emb -> md [style=invis];
-  md  -> idx [label="watch", style=dashed, constraint=false];
-  git -> sen [label="log -G", style=dashed, constraint=false];
-  sen -> md  [label="FS write", style=dashed, constraint=false];
+  /* engine ↔ store */
+  idx  -> sv    [dir=both];
+  idx  -> lmdb  [dir=both];
+  ret  -> sv    [dir=both];
+  ret  -> usrch [dir=both];
+  conv -> usrch [dir=both];
+  conv -> lmdb  [dir=both];
+  sen  -> lmdb  [dir=both];
+  ledger -> lmdb [dir=both];
+  sleep -> sv   [dir=both];
+  sleep -> lmdb [dir=both];
+  rcu  -> sv    [style=dashed, label="hot cache"];
+
+  /* engine → registry */
+  ret  -> emb   [label="embed(query)"];
+  ret  -> rr    [label="rerank"];
+  sen  -> judge [label="adjudicate"];
+  idx  -> emb   [label="embed(doc)"];
+
+  /* push registry below engine */
+  sv    -> emb  [style=invis];
+  lmdb  -> judge [style=invis];
+
+  /* vault edges */
+  emb  -> md    [style=invis];
+  md   -> idx   [label="watch", style=dashed, constraint=false];
+  git  -> sen   [label="log -G / supersedes", style=dashed, constraint=false];
+  sen  -> md    [label="FS write", style=dashed, constraint=false];
 }
