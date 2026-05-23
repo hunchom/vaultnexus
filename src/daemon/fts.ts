@@ -30,6 +30,11 @@ export class FtsIndex {
     if (!match) return [];
     return this.db
       .prepare('SELECT rowid AS id, -bm25(chunks) AS score FROM chunks WHERE chunks MATCH ? ORDER BY bm25(chunks) LIMIT ?')
-      .all(match, k) as FtsHit[];
+      .all(match, Math.trunc(k)) as FtsHit[]; // LIMIT needs int → float k throws "datatype mismatch"
+  }
+
+  /** Release the in-memory db (native handle). */
+  close(): void {
+    this.db.close();
   }
 }

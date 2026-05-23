@@ -22,4 +22,8 @@ describe('fuseRRF', () => {
     const fused = fuseRRF([[10, 11], [12, 13]], 1);
     expect(new Set([fused[0], fused[1]])).toEqual(new Set([10, 12]));
   });
+  it('on a fused-score tie, prefers the earlier (more-trusted) list', () => {
+    // 5 rank-0 in list 0, 2 rank-0 in list 1 → both score 1/61; semantic (first) list wins
+    expect(fuseRRF([[5, 6, 7], [2, 8, 9]])[0]).toBe(5);
+  });
 });

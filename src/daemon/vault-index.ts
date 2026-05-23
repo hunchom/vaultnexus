@@ -90,14 +90,21 @@ export class VaultIndex {
     if (this.chunks.length === 0) return [];
     if (!this.flatInt8) this.build();
     const [qe] = await this.embedder.embed([text]);
-    const want = k * 8;
-    const vec = search(l2normalize(qe), {
+    const q = l2normalize(qe);
+    const want = Math.floor(k) * 8; // FTS LIMIT needs int; vec list parity
+    const vec = search(q, {
       flatInt8: this.flatInt8!, flatF32: this.flatF32!,
       count: this.chunks.length, dims: this.dims, scale: this.scale, k: want,
     });
     const lex = this.fts.search(text, want);
     const fused = fuseRRF([vec.map((r) => r.index), lex.map((r) => r.id)]).slice(0, k);
     const cos = new Map(vec.map((r) => [r.index, r.score]));
-    return fused.map((index) => ({ ...this.chunks[index], score: cos.get(index) ?? 0 }));
+    // FTS-only hit (outside vector top-want) → compute its true cosine, never surface 0
+    return fused.map((index) => ({ ...this.chunks[index], score: cos.get(index) ?? dotF32(q, this.f32[index]) }));
+  }
+
+  /** Release native FTS db handle. */
+  close(): void {
+    this.fts.close();
   }
 }
