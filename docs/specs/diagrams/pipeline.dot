@@ -2,97 +2,162 @@ digraph Pipeline {
   rankdir=TB;
   bgcolor="white";
   graph [dpi=200, fontname="Helvetica-Bold", fontsize=15, labeljust="l",
-         margin=16, ranksep=1.0, nodesep=0.5];
+         margin=20, ranksep=1.2, nodesep=0.6];
   node  [fontname="Helvetica", fontsize=12, shape=box, style="rounded,filled",
-         penwidth=1.1, color="#888888", fillcolor="#ffffff", margin="0.18,0.10"];
+         penwidth=1.1, color="#888888", fillcolor="#ffffff", margin="0.20,0.12"];
   edge  [fontname="Helvetica", fontsize=10, color="#555555"];
 
-  /* ======================================================
-     TOP: INDEX PATH
-     ====================================================== */
+  /* ============================================================
+     INDEX LANE
+     ============================================================ */
   subgraph cluster_index {
-    label="INDEX PATH  (incremental · content-hash cached)";
+    label="INDEX LANE  (incremental · content-hash cached)";
     style="rounded,filled"; color="#74c98c"; fillcolor="#e9fbef"; fontcolor="#0d5a2a";
+    fontsize=14;
 
     i_md    [label="vault/*.md", shape=folder, fillcolor="#f2fff6"];
     i_parse [label="parse  (remark + Quartz OFM)\nwikilink resolve · tags · ^blocks",
              fillcolor="#f2fff6"];
-    i_chunk [label="hierarchical chunk\nsentence / chunk / note\noffset-faithful  +  BM25 blurb",
+    i_chunk [label="hierarchical chunk\nsentence / chunk / note  (offset-faithful)\n+  BM25 blurb",
              fillcolor="#f2fff6"];
-    i_embed [label="embed(doc)\nregistered embedder\n(contextual if supported · resident-local option)",
+    i_embed [label="embed(doc)\nresident-accelerated embedder\n(ANE/Metal/AMX · contextual if supported)",
+             fillcolor="#f2fff6"];
+    i_mv    [label="MV token vectors  (note+chunk tiers)\n1–2-bit residual-quantized\n~20–36 B/token  ·  gated behind confidence escalation",
              fillcolor="#f2fff6"];
     i_claim [label="sentence tier → Claim Index\n(assertion pre-filter)",
              fillcolor="#f2fff6"];
-    i_knn   [label="build kNN adjacency graph\n(usearch · k≈8-16)\nshared: expansion + convergence edges",
+    i_knn   [label="build usearch kNN graph  (k≈8-16)\nshared: expansion + convergence edges",
              fillcolor="#f2fff6"];
-    i_store [label="store\nbinary codes + int8 rescore\n+  FTS5 row  +  kNN CSR",
+    i_store [label="store\nRaBitQ binary codes + int8 + f32 rescore lanes\n+  FTS5 row  +  kNN CSR  +  MV tokens",
              shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
 
     i_md    -> i_parse [label="chokidar"];
     i_parse -> i_chunk;
     i_chunk -> i_embed;
     i_chunk -> i_claim;
+    i_embed -> i_mv;
     i_embed -> i_knn;
     i_embed -> i_store [label="vectors"];
+    i_mv    -> i_store [label="MV tokens"];
     i_claim -> i_store [label="claims"];
     i_knn   -> i_store [label="CSR graph"];
   }
 
-  /* ======================================================
-     BOTTOM-LEFT: QUERY PATH
-     ====================================================== */
+  /* ============================================================
+     QUERY PATH — shared entry
+     ============================================================ */
   subgraph cluster_query {
-    label="QUERY PATH  (hot path · zero generative LLM)";
+    label="QUERY PATH";
     style="rounded,filled"; color="#9cc7f0"; fillcolor="#eaf4ff"; fontcolor="#0b4a82";
+    fontsize=14;
 
-    q_in    [label="query", fillcolor="#dceeff"];
+    q_in   [label="query", fillcolor="#dceeff"];
 
-    q_rtr   [label="ROUTER\ncached TF-IDF/SVM + heuristics\n~0.1ms · NO embed call\n→ α-prior · expansion flag · rerank-disposition",
-             fillcolor="#dceeff"];
+    q_pre  [label="PREFETCH  (speculative embed+retrieve)\nRCU cache  p(hit)≈75% → 0ms",
+            fillcolor="#dceeff", color="#0b4a82"];
 
-    /* first-stage parallel */
-    q_emb   [label="embed(query)\nregistered embedder"];
-    q_bm    [label="BM25\n(FTS5)"];
-    q_wl    [label="wikilink-CTE\n(1-hop frontier)"];
-    {rank=same; q_emb; q_bm; q_wl;}
+    q_rtr  [label="ROUTER\ncached TF-IDF/SVM + heuristics  ~0.1ms  (no embed)\n→ α-prior · expand? · MV? · rerank-tier",
+            fillcolor="#dceeff"];
 
-    q_fuse  [label="CC / TMM fusion\n(IDF-adaptive α · RRF cold-start)\n→ fused pool"];
+    /* ---- LOOKUP LANE ---- */
+    subgraph cluster_lookup {
+      label="LOOKUP LANE  (zero-LLM · common case · ~5ms)";
+      style="rounded,filled"; color="#74c98c"; fillcolor="#e9fbef"; fontcolor="#0d5a2a";
+      fontsize=13;
 
-    q_gate  [label="CONFIDENCE GATE\ntop1−top2 gap · lexical∩semantic · entropy\n(free · self-warms from eval labels)"];
+      l_dense [label="dense RaBitQ-cascade scan\n(binary→int8→f32)", fillcolor="#f2fff6"];
+      l_bm    [label="FTS5 BM25", fillcolor="#f2fff6"];
+      l_wl    [label="wikilink-CTE\n(1-hop frontier)", fillcolor="#f2fff6"];
+      {rank=same; l_dense; l_bm; l_wl;}
 
-    /* HIGH branch */
-    q_hi    [label="HIGH confidence\n→ early-exit", fillcolor="#d4f7dc"];
-    q_dpp_h [label="DPP coverage select\n→ adaptive-k", fillcolor="#d4f7dc"];
+      l_fuse  [label="CC / TMM fusion\nonline-learned weights · RRF cold-start\n→ fused pool",
+               fillcolor="#f2fff6"];
 
-    /* LOW branch */
-    q_lo    [label="LOW confidence\n→ GAR/RGS expansion", fillcolor="#fff3cd"];
-    q_gar   [label="GAR/RGS adaptive expansion\nrerank batch\n→ kNN + wikilink neighbors\nof cross-encoder-confirmed notes\n→ rerank → repeat (in budget)",
-             fillcolor="#fff3cd"];
-    q_dpp_l [label="DPP coverage select\n→ adaptive-k", fillcolor="#fff3cd"];
+      l_gate  [label="CONFIDENCE GATE\ntop1−top2 gap · lexical∩semantic · entropy\n(free · self-warms from eval labels)",
+               fillcolor="#f2fff6"];
 
-    q_out   [label="cited hits\npath#heading^block · snippet · score · why-retrieved",
-             fillcolor="#c8e6ff"];
+      l_dense -> l_fuse;
+      l_bm    -> l_fuse;
+      l_wl    -> l_fuse;
+      l_fuse  -> l_gate;
+    }
 
-    q_in  -> q_rtr;
-    q_rtr -> q_emb;
-    q_rtr -> q_bm;
-    q_rtr -> q_wl;
-    q_emb -> q_fuse;
-    q_bm  -> q_fuse;
-    q_wl  -> q_fuse;
-    q_fuse -> q_gate;
-    q_gate -> q_hi [label="HIGH"];
-    q_gate -> q_lo [label="LOW"];
-    q_hi   -> q_dpp_h;
-    q_lo   -> q_gar;
-    q_gar  -> q_dpp_l;
-    q_dpp_h -> q_out;
-    q_dpp_l -> q_out;
+    l_hi   [label="HIGH confidence → early-exit", fillcolor="#d4f7dc"];
+    l_dpp  [label="DPP coverage select → adaptive-k", fillcolor="#d4f7dc"];
+
+    /* ---- REASONING LANE ---- */
+    subgraph cluster_reason {
+      label="REASONING LANE  (analytical / convergence / multi-hop · ~10–20ms)";
+      style="rounded,filled"; color="#f0a875"; fillcolor="#fff6ee"; fontcolor="#7a3000";
+      fontsize=13;
+
+      r_cot  [label="CoT query decompose\n(host-session judge)", fillcolor="#fff0e0"];
+      r_ppr  [label="dense-seeded PPR\nforward-push over kNN + wikilink graph\n(HippoRAG-2-grade)",
+              fillcolor="#fff0e0"];
+      r_mv   [label="MUVERA multi-vector FDE shortlist\nChamfer / MaxSim rerank\n(breaks single-vector ceiling)",
+              fillcolor="#fff0e0"];
+      r_first [label="FIRST  single-token listwise rerank\n(host judge or undici pointwise)",
+               fillcolor="#fff0e0"];
+      r_crag [label="CRAG self-correct\n{sufficient | reformulate | fetch-the-bridge}",
+              fillcolor="#fff0e0"];
+      r_gar  [label="GAR / RGS frontier expansion\nkNN + wikilink · weighted · within budget",
+              fillcolor="#fff0e0"];
+      r_dpp  [label="DPP coverage select → adaptive-k", fillcolor="#fff0e0"];
+
+      r_cot   -> r_ppr;
+      r_ppr   -> r_mv;
+      r_mv    -> r_first;
+      r_first -> r_crag;
+      r_crag  -> r_gar;
+      r_gar   -> r_dpp;
+    }
+
+    q_out  [label="cited hits\npath#heading^block · snippet · score · why-retrieved · evidence-chain?",
+            fillcolor="#c8e6ff"];
+
+    q_in   -> q_pre;
+    q_pre  -> q_rtr;
+    q_rtr  -> l_dense;
+    q_rtr  -> l_bm;
+    q_rtr  -> l_wl;
+    l_gate -> l_hi  [label="HIGH"];
+    l_gate -> r_cot [label="LOW → escalate"];
+    l_hi   -> l_dpp;
+    l_dpp  -> q_out;
+    r_dpp  -> q_out;
   }
 
-  /* store feeds query */
-  i_store -> q_fuse [label="vec scan (simsimd)\n+ BM25 (FTS5)",
-                     style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
-  i_store -> q_gar  [label="kNN graph\n+ wikilink CSR",
-                     style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  /* ============================================================
+     SHARED VECTOR ENGINE
+     ============================================================ */
+  subgraph cluster_vec {
+    label="SHARED VECTOR ENGINE";
+    style="rounded,filled"; color="#a86fd8"; fillcolor="#f8f2ff"; fontcolor="#4a1580";
+    fontsize=14;
+
+    v_rabq [label="usearch RaBitQ cascade\nbinary→int8→exact-f32",
+            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    v_fts  [label="FTS5 bm25()",
+            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    v_lmdb [label="LMDB\nkNN CSR · wikilink CSR · Claim Index · MV tokens",
+            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    {rank=same; v_rabq; v_fts; v_lmdb;}
+  }
+
+  /* store → vector engine (they are the same logical store) */
+  i_store -> v_rabq [dir=both, style=dashed, color="#a86fd8"];
+  i_store -> v_fts  [dir=both, style=dashed, color="#a86fd8"];
+  i_store -> v_lmdb [dir=both, style=dashed, color="#a86fd8"];
+
+  /* vector engine feeds query */
+  v_rabq -> l_dense [label="vec scan", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  v_fts  -> l_bm    [label="BM25", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  v_lmdb -> l_wl    [label="wikilink CSR", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  v_lmdb -> r_ppr   [label="kNN + wikilink", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  v_lmdb -> r_mv    [label="MV tokens", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+  v_lmdb -> r_gar   [label="kNN CSR", style=dashed, color="#a86fd8", fontcolor="#a86fd8"];
+
+  /* keep tall */
+  v_rabq -> q_in  [style=invis];
+  v_lmdb -> q_out [style=invis];
 }

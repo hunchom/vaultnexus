@@ -1,9 +1,9 @@
-# VaultNexus — Design Spec (v3.0)
+# VaultNexus — Design Spec (v3.1)
 
-> **VaultNexus finds where your scattered ideas secretly agree — and thinks about your notes while you sleep.**
-> A Claude Code ↔ Obsidian knowledge engine: best-in-class semantic + graph retrieval over your vault, a **Convergence/Bridge** engine that surfaces hidden agreement across distant notes, an opt-in **Sentinel** that catches genuine self-contradiction and belief-drift, and a **Decision & Prediction Ledger** that makes the vault improve your judgment. **Standalone-daemon architecture** (one lean Node engine bears all CPU and consolidates on idle cycles; every UI is a thin client), fully offline-capable, one-command GitHub build.
+> **VaultNexus reasons over your vault — it doesn't just search it.**
+> A Claude Code ↔ Obsidian knowledge engine: an OP retrieval brain (quantized-graph ANN + multi-vector late-interaction, scales to a billion chunks, exact and blazing fast), a two-speed pipeline that *reasons* on hard queries, a **Convergence/Bridge** engine that surfaces hidden agreement across distant notes, an opt-in **Sentinel** built on a convergent signed-belief-propagation graph that catches genuine self-contradiction and belief-drift, a **Decision & Prediction Ledger** that sharpens your judgment, and a daemon that **consolidates and drafts overnight**. Standalone-daemon architecture (one engine bears all CPU/GPU; thin clients), fully offline-capable, one-command GitHub build.
 
-Status: **Design v3.0 — incorporates two rounds of adversarial review (8 agents) + a 10-agent best-of-breed validation wave + a 10-agent "think-different / model-agnostic" relaunch. Models are pluggable via a 3-category registry and are deliberately not pinned. Pending user approval.**
+Status: **Design v3.1 — folds three best-of-breed agent waves: (1) 10× "validate each is the absolute best", (2) 10× "think-different / model-agnostic relaunch", (3) 10× "OP / find-the-ceiling" (the previous pass over-rotated to minimalism; this restores maximum ambition). Models are pluggable via a 3-category registry and never pinned. Pending user approval.**
 Date: 2026-05-23
 Spec owner: Roger
 
@@ -11,228 +11,191 @@ Spec owner: Roger
 
 ## 1. Problem & opportunity
 
-Existing Obsidian AI tools fall in three buckets, all leaving the same gap:
+Existing Obsidian AI tools: **Smart Connections** (cosine in the renderer — freezes the app), **Mem/Reflect** (connection-surfacing, commoditized), every Obsidian MCP server (CRUD wrappers), **InfraNodus** (topic-level structural gaps). mem0's *State of Agent Memory 2026* lists the real white space as **unsolved**: claim-level convergence, belief tracking, contradiction, surprise-retrieval, proactive consolidation, self-improving memory.
 
-- **Smart Connections** (5k★) — local cosine similarity computed *in the Obsidian renderer* (freezes the app), no graph reasoning, no API/MCP, no write-back.
-- **basic-memory / Mem / Reflect** — connection-surfacing is commoditized; flat/atemporal.
-- **Every Obsidian MCP server** — thin CRUD-over-REST wrappers; the one real semantic one (`jacksteamdev`) archived 2026-05-13. Topic-level gap-finding is already owned by **InfraNodus** (Louvain + betweenness + structural-gap research-questions).
-
-White space, verified against the 2026 landscape (mem0 *State of Agent Memory 2026* lists these as explicitly **unsolved**): (a) frontier semantic+graph retrieval, MCP-exposed; (b) **epistemic intelligence** — convergence/bridge detection at the *claim* level (not InfraNodus's topic level), belief-drift, contradiction, and decision-calibration; (c) an idle daemon that **consolidates knowledge while you sleep**. The moat is the **retrieval brain + the epistemic engine**, not CRUD.
+The opportunity is not "better search" — search is becoming commoditized. It is a **reasoning knowledge engine**: one that retrieves at the SOTA frontier (multi-vector late-interaction past the proven single-vector ceiling), *reasons* over the result with citations, models your beliefs as a convergent graph, surfaces where your ideas secretly agree, and gets smarter the more you use it. The moat is the **reasoning brain + the belief engine**, not CRUD.
 
 ## 2. Goals / non-goals
 
 **Goals**
-- Best-quality retrieval: hierarchical (sentence→chunk→note) contextual vectors + BM25, fused (CC/TMM) + **reranker-guided adaptive graph expansion (GAR/RGS)**, cited to `path#heading^block`.
-- **Convergence/Bridge detection** as the headline differentiator; the **Sentinel** (contradiction + belief-drift) as an opt-in, pull-first, FP-gated companion; the **Decision & Prediction Ledger** as the behavior-changing hook.
-- **Standalone daemon** owns 100% of compute and is the single source of truth; clients are thin. Uses idle cycles for **sleep-time consolidation**.
-- **Offline-capable, honestly scoped**; local models run in the daemon (never a renderer). **Local-first registry is a first-class privacy default.**
-- **GitHub-ready, offline-buildable, lean dep set** (the lean store deletes the embedded-Postgres packaging risk).
-- **Blazing fast**: query path = brute-force binary scan (~1ms@8-core local) + two API round-trips, with a predictive cache that turns the common case into a cache hit; zero generative LLM in the hot path.
-- Agentic write-back: our own tools, dry-run + confirm, link-safe.
+- **OP retrieval**: quantized-graph ANN + exact rescore (exact top-k, HNSW-latency, scales to ~1B) + a **multi-vector late-interaction precision tier** that breaks the proven single-vector dimensional ceiling; hierarchical (sentence→chunk→note) contextual representation; cited to `path#heading^block`.
+- **Reasons, doesn't just retrieve**: a two-speed pipeline — a zero-LLM lookup lane for "find that note", and a reasoning lane (CoT query decomposition → graph PPR → multi-vector → listwise rerank → self-correction) for analytical/convergence/multi-hop queries.
+- **Convergence/Bridge** as the headline; the **Sentinel** (signed belief-propagation) as an opt-in, pull-first, FP-gated companion; the **Decision & Prediction Ledger** as the judgment hook; **cited reasoning** + **counterfactual belief surgery** as the smart differentiators.
+- **Standalone daemon** owns all CPU **and the machine's accelerators** (a hardware-probed Compute backend); uses idle cycles for **sleep-time consolidation and note-drafting**; gets measurably smarter on *your* vault with use.
+- **Blazing fast AND OP at every scale** (not a trade): <1ms@1M, ~30–60ms@100M, <3ms@1B (DiskANN tier); the embedding round-trip is killed by a resident on-accelerator embedder + predictive prefetch.
+- **Model-agnostic, local-first-capable**, embeddable (no mandatory Docker), offline-buildable, lean-but-powerful dep set.
+- Agentic write-back: our own tools, dry-run + confirm.
 
 **Non-goals**
-- Competing on CRUD; topic-level gap-finding (InfraNodus owns it — we do *claim-level* epistemic bridging instead).
-- A persistent LLM-extracted fact graph (killed — §10). *(The deterministic Claim Index in §6 is NOT this.)*
+- Competing on CRUD; topic-level gap-finding (InfraNodus owns it — we do *claim-level* epistemic work).
+- A persistent LLM-extracted fact graph (killed — §10). The deterministic Claim Index + the belief graph are NOT this.
 - Plugin-first; the Obsidian plugin is a P2 thin client.
-- Multi-user / cloud sync.
-- Running models in the Obsidian renderer.
-- Any expensive LLM call in the hot retrieval path, or any **push** ("we caught something") notification before precision is proven (§6, §7).
+- Multi-user / cloud sync; running models in the renderer.
+- An **expensive LLM in the *lookup* path** (the reasoning lane is opt-in, routed, and cached); any **push** notification before precision is proven.
 
 ## 3. Guiding decisions (and what was rejected)
 
 | Decision | Choice | Rejected & why |
 |---|---|---|
-| Vehicle | **Standalone engine daemon + thin clients**, justified by FS-watch + keep-compute-out-of-renderer + **sleep-time consolidation** (not "overkill for its own sake") | plugin-first/monorepo; a Skill+CLI-only tool (real steelman — but loses the watcher, the resident embedder, and the idle consolidation engine) |
-| Language / runtime | **TypeScript on Node 22** | Bun (JSC can't load native ABI; RSS leaks), Deno (MCPB pinned to Node-22 ABI) |
-| Store | **REVERSED to a lean embedded default behind one `Store` interface.** Default = **sqlite-vec/vectorlite (FTS5 BM25) + simsimd binary-quant brute-force scan + a kNN adjacency graph (usearch mmap, built at index time) + LMDB** (CSR wikilink graph, claims, content-hash cache). **No ANN index for search at ≤1M** (binary brute-force ~1ms@8-core, exact filtered search, instant mmap restart). **Overkill tier (opt-in `PG_URL`, Linux): your own Postgres + pgvectorscale + pg_search/VectorChord.** | **Embedded-PostgreSQL-as-default** (its pgvector-bundling pipeline was the #1 packaging risk; MVCC solves a concurrency problem the single-writer topology designs away; `-march=native`/symlink/Windows-full minefield); HNSW-as-default (build/corruption/restart cost for no latency win at this scale); DuckDB (data-loss on unclean shutdown); LanceDB (no SQL graph/claims) |
-| Retrieval representation | **REVERSED to hierarchical small-to-big**: index sentence + chunk + note granularities in one store (discriminated by a `granularity` field), retrieve precise, return the parent. The **sentence tier doubles as the Claim Index**; the **kNN edges double as the convergence/bridge edges** — one shared structure. | flat 256–512 chunks only (467% precision swing with chunk size; no universal size); proposition/atomic-fact indexing (LLM index tax + breaks the `slice(start,end)===text` provenance contract — kept *only* as the Claim Index) |
-| **Provider registry** (one layer, 3 roles) | **Bring-what-you-have, any vendor, local OR API, multiples allowed.** A **recommendation engine** assigns each registered model a **role — embed / rerank / judge** — via **capability probing + a vault-grounded micro-benchmark**, not a static table. | hardcoding any vendor; pinning rerank/judge; a static metadata table as the capability oracle (dims aren't lookuppable from any OpenAI-compat endpoint) |
-| ↳ embed role | **any embedder** (vendor or local); **dims discovered by probe** (`bit`/`halfvec` sized at index time). Contextual-chunk mode (whole-note context at index time) used if the embedder supports it; else plain. **A warm resident local embedder is a first-class hot-path option** (~10ms vs ~800ms cloud), optionally **hedged-raced** against a cloud embedder. | pinning any one model; cloud-only |
-| ↳ rerank role | **OPTIONAL** — any reranker (vendor or local); absent → graceful degradation (the compiler widens first-stage). **Owned via a ~150-LOC undici client** (Voyage/Cohere/Jina rerank are the same 6-field shape), not the AI SDK. | making rerank mandatory; bundling non-commercial weights |
-| ↳ judge role | **any chat LLM** — the host session (tool-result-as-judge, zero-key default) or any configured LLM; **cascade** (cheap/local first, escalate on low confidence). **Via Vercel AI SDK v6** (its one genuinely polyglot, low-churn surface). | pinning the judge; MCP `sampling` (dead) |
-| Provider implementation | **AI SDK v6 for chat/judge ONLY; own embed + rerank in ~150 LOC undici** (the SDK's `rerank()` is Cohere/Bedrock/Together-only and `embedMany()`'s flat-array contract can't express contextual list-of-lists; V2→V3 churn breaks community providers). **Capability negotiation** (probe dims/ctx/limits at registration) + **vault-grounded micro-benchmark router** (score the user's providers on ~30 Q→note pairs from their own vault; route per-call) + a pure **degradation compiler** (`capability_card → pipeline params`). | depending on the AI SDK for all three roles; LiteLLM/Portkey/LangChain (gateway hop / Python sidecar / bloat) |
-| Fusion | **convex-combination + theoretical-min-max normalization, IDF-adaptive weights**; **RRF k=60 cold-start fallback**; **per-query expansion gate** (conceptual → expand, exact-match → skip) | fixed-weight RRF only; SPLADE/learned-sparse third leg (GPU-bound, tokenizer-destructive on personal jargon) |
-| Graph / expansion | **REVERSED: GAR/RGS reranker-guided adaptive expansion** — traverse the kNN graph (+ wikilink edges, weighted higher) around *cross-encoder-confirmed* notes, within the existing rerank budget (+8–20% NDCG at ~0 added cost). The 1-hop wikilink CTE is repurposed as a frontier neighbor-source *inside* the loop. | 1-hop CTE + RRF alone (fixed-pool relevance ceiling); HippoRAG entity-seeded PPR (hub-bias) — but **dense-seeded, hub-pruned PPR is restored for the bridge/Epistemic view**, not the hot path |
-| Temporal | **git history + mtime + frontmatter + user-confirmed `supersedes` edges** (the confirm-loop already collects "it's-an-update" — capture it as a deterministic typed edge; lets retrieval down-rank superseded claims) | Graphiti bi-temporal LLM fact graph (drift, cost); throwing away the supersedes signal |
-| Sentinel substrate | **REVERSED to a Belief-State Energy Model** (Ising/cognitive-dissonance: `H = Σωᵢⱼ|bᵢ−bⱼ|`, edges from the wikilink graph + claim similarity, signs cached from the judge) → contradiction = an edit that spikes a tightly-bound cluster's dissonance (structural surprise). Front-ended by a **winkNLP negation/polarity router** (kills "Semantic Collapse" symbolically). Drift via **BOCPD** change-point detection. | a pure pairwise filter-funnel; embedding similarity as a standalone contradiction pre-filter (negation-blind); local NLI model |
-| Headline vs Sentinel | **Convergence/Bridge is the headline** (FP-safe, ~5× hit-rate, dodges reference-indeterminacy). **Contradiction is opt-in, pull-only, behind a hard FP kill-criterion.** | leading with contradiction (REFNLI: >80% false-contradiction under context-mismatch; a false "you contradicted yourself" erodes trust) |
-| Proactivity / UX | **Pull-first.** On-demand checks; a daily **morning brief** the user opens (not a push). Ambient push is the *last* thing built, opt-in, affirming-framed. | proactive "we caught something" notifications ("When Help Backfires": confirm-steps don't remove the threat) |
-| First-run config | config file (+ plugin settings UI later) | MCP `elicitation` (unsupported) |
-| MCP SDK + shim | TS SDK v1.x (≥1.24.0 for HTTP). Claude Code shim = **~40-line self-bridge** (SDK `StdioServerTransport` → daemon over undici `socketPath`) | `mcp-proxy` npm (pulls a public-tunneling SaaS dep) |
+| Vehicle | **Standalone engine daemon + thin clients**, justified by FS-watch + keep-compute-out-of-renderer + **sleep-time consolidation** + owning the **accelerators** | plugin-first; a Skill+CLI-only tool (loses the watcher, the resident accelerated embedder, the belief engine, the idle consolidation) |
+| Runtime | **TypeScript on Node 22** | Bun/Deno (native-ABI / MCPB pin) |
+| **Compute / acceleration** | **A hardware-probed `Compute` backend in `core/`** — `Accelerate(AMX) → Metal/MPS/WebGPU(Dawn) → ANE(Core ML) → cuVS/CAGRA(CUDA)` — behind one interface fronting embed forward-pass + index build + distance/rescore. The model-agnostic registry pattern applied to silicon; **degrades to the simsimd-CPU floor** when no accelerator exists. Embeddable, no Docker (Node 22 ships WebGPU-via-Dawn Metal backend, prebuilt arm64; Accelerate + Core ML are in-OS). | "no acceleration, brute-force forever" (self-contradicts the resident-embedder goal; incompatible with 100M+ scale) |
+| Store / engine | **OP quantized-graph vector engine** behind one capability-probed `VectorIndex`: **usearch** (Apache, mmap, b1/i8/f16, SimSIMD) as the universal embeddable core, a **RaBitQ binary→int8→exact-f32 rescore cascade** (exact top-k, ~32× less RAM, ~40× faster scan), a **cuvs IVF-RaBitQ/CAGRA GPU tier** auto-lit on NVIDIA, and **VectorChord DiskANN** (server-only) for 100M–1B. **FTS5 `bm25()`** for keyword; **LMDB** for the CSR wikilink graph, Claim Index, multi-vector token store, cache. | **embedded-Postgres-default** (packaging minefield → opt-in `PG_URL`); **brute-force-as-the-engine / no ANN** (a regression — caps at ~1M, ignores the graph it already builds; demoted to the refine kernel + exact-filtered fallback); **naive PQ** (RaBitQ dominates it); DuckDB/LanceDB (see notes) |
+| Retrieval representation | **Hierarchical small-to-big** (sentence/chunk/note, one index, `granularity` field) + a **multi-vector (ColBERT-style) token store for the note+chunk tiers** (1–2-bit residual-quantized, ~20–36 B/token, gated behind confidence escalation). The sentence tier = the Claim Index; the kNN edges = the convergence edges. | flat 512 chunks only (proven precision ceiling); proposition-for-retrieval (LLM tax + breaks provenance) |
+| Retrieval pipeline | **Two-speed reasoning retriever** (REVERSED from a fixed funnel): **lookup lane** (router → dense binary scan + BM25 → CC/TMM fusion w/ **online-learned weights** → confidence gate → DPP → adaptive-k, zero-LLM, ~5ms); **reasoning lane** on escalation (CoT decomposition → dense-seeded **PPR** over kNN+wikilink → **MUVERA multi-vector** → **FIRST single-token listwise rerank** → **CRAG self-correction** → DPP → adaptive-k). | single dense vector + BM25 only (proven dimensional ceiling on the conjunctive/convergence queries that matter most); HyDE / blind query rewriting |
+| **Provider registry** (3 model-agnostic roles) | embed (required) / rerank (optional) / judge (host session counts). **Capability probing** (dims aren't lookuppable → probe `.length`) + a **vault-grounded micro-benchmark router** (score the user's providers on ~30 Q→note pairs from their own vault; per-space embed, per-call rerank, cascade judge) + a pure **degradation compiler**. **AI SDK v6 for chat/judge only; own embed+rerank in ~150 LOC undici** (SDK rerank() is Cohere/Bedrock/Together-only; can't express contextual list-of-lists). Reranker interface carries an **`instruction?`** field (instruction-following rerank). | pinning any vendor/model; the AI SDK for all three roles; a static metadata table as the capability oracle |
+| Fusion | **CC + theoretical-min-max, ONLINE-learned weights** (the eval golden set + confidence-gate labels are the supervision; RRF k=60 = zero-shot fallback); per-query expansion/MV gate | fixed-weight RRF only; SPLADE as a default (tokenizer-destructive on personal jargon — A/B opt-in only for lexical-heavy vaults) |
+| Graph / expansion | **Dense-seeded PPR (Forward-Push, `O(1/αε)`) + GAR/RGS reranker-guided traversal** over the unified kNN+wikilink graph, as a **first-class retrieval signal** (HippoRAG-2-grade; the bridge engine and the retriever share one PPR core). Hub-bias solved by top-1% hub-pruning. | 1-hop CTE alone (fixed-pool ceiling); entity-seeded PPR (hub-bias); GraphRAG LLM-built graph |
+| Sentinel substrate | **Signed Belief-Propagation graph with Reasoning Zones** (credibility Ψ vs confidence Φ; a damped contractive operator with a **guaranteed unique fixed point** → confidence emerges, killing the edge-weight/τ dials; **Harary-balanced Reasoning Zones**, linear-time, where multi-hop inference is sound; shock updates). Front-ended by a **winkNLP negation/polarity router**. One operator → contradiction + drift + **cited reasoning** + **counterfactual surgery**. | a static pairwise energy snapshot; embedding similarity as a standalone contradiction filter (negation-blind); local NLI |
+| Temporal | git + mtime + frontmatter + **user-confirmed `supersedes` edges** + **bi-temporal edge validity intervals** (`valid_from`/`valid_to`/`invalidated_by`); **BOCPD** change-point drift | Graphiti bi-temporal LLM fact graph; throwing away the supersedes/validity signal |
+| Headline vs Sentinel | **Convergence/Bridge is the headline** (FP-safe, ~5× hit-rate; *now actually works* because the multi-vector tier supplies the conjunctive-query capability it needs). **Contradiction is opt-in, pull-only, behind a hard FP kill-criterion.** | leading with contradiction (REFNLI: >80% false-contradiction under context-mismatch) |
+| Self-improvement | **The system gets smarter on your vault with use** — listwise DPO / LinUCB from the confirm/dismiss + citation signal already collected (no GPU, no retraining); a self-edited **procedural memory** (learned retrieval strategies) on idle cycles | a static system that never learns from its own usage |
+| Proactivity / UX | **Pull-first.** One **active-inference objective** (Bayesian surprise = expected free energy) ranks every proactive surface; the daemon **drafts the unwritten note** as a dry-run for a morning brief the user opens — never a push. | proactive "we caught something" notifications ("When Help Backfires") |
+| First-run config | config file (+ plugin settings UI later) | MCP `elicitation` |
+| MCP SDK + shim | TS SDK v1.x (≥1.24.0 for HTTP); **~40-line self-bridge** over the Unix socket | `mcp-proxy` npm (tunneling SaaS dep) |
 
 ## 4. Architecture
 
 ```
-vaultnexus/   ONE lean Node package (pnpm; catalog centralizes dep versions)
+vaultnexus/   ONE Node package (pnpm; catalog centralizes versions)
 ├── src/
-│   ├── core/      pure compute (no I/O): hierarchical chunking · fusion
-│   │              (CC/TMM/RRF, IDF-adaptive) · GAR/RGS expansion · DPP
-│   │              coverage · adaptive-k · belief-energy model · BOCPD ·
-│   │              QBAF semantics · Bayesian-surprise · degradation compiler ·
-│   │              eval · INTERFACES (EmbeddingProvider, Reranker, Judge,
-│   │              Clock, VaultReader, VaultWriter, LinkGraphSource, Store)
-│   ├── store/     Store interface + SqliteStore (default: sqlite-vec/vectorlite
-│   │              + FTS5 + LMDB CSR graph/claims/cache + usearch kNN) /
-│   │              PostgresStore (opt-in PG_URL). simsimd + Accelerate distance.
-│   ├── providers/ REGISTRY — roles {embed, rerank?, judge}; capability probe +
-│   │              vault-grounded micro-benchmark router; AI SDK (chat/judge) +
-│   │              ~150-LOC undici embed/rerank clients
-│   ├── engine/    the DAEMON: Hono(Unix-socket + loopback) server, FS watcher,
-│   │              single-writer index, RCU lock-free hot cache, predictive
-│   │              prefetch, sleep-time consolidation loop. Bears 100% of CPU.
+│   ├── core/      pure compute (no I/O): Compute backend (AMX/Metal/ANE/cuVS) ·
+│   │              hierarchical chunking · CC/TMM online-learned fusion ·
+│   │              PPR (forward-push) · GAR/RGS · MUVERA FDE · DPP · adaptive-k ·
+│   │              signed belief-propagation + Reasoning Zones · BOCPD · QBAF ·
+│   │              counterfactual surgery · active-inference scoring · eval ·
+│   │              INTERFACES (Embedding, Reranker, Judge, VectorIndex, Store, …)
+│   ├── store/     VectorIndex (usearch RaBitQ-cascade core · cuvs GPU tier ·
+│   │              VectorChord disk tier) + FTS5 + LMDB (graph/claims/MV/cache)
+│   ├── providers/ REGISTRY — capability probe + vault-grounded router; AI SDK
+│   │              (chat/judge) + ~150-LOC undici embed/rerank (instruction-following)
+│   ├── engine/    the DAEMON: Hono(socket+loopback), watcher, single writer,
+│   │              RCU lock-free cache, predictive prefetch, sleep-time consolidation
 │   ├── server/    MCP surface (tools/resources/instructions + notifications)
 │   ├── shim/      ~40-line stdio→daemon self-bridge (Claude Code)
 │   └── index/     FS walk + parser + hierarchical chunker + chokidar + cache
-├── clients/
-│   └── obsidian/  THIN Obsidian plugin: UI + HTTP calls only, ZERO compute
-├── docs/specs/    this document
-└── (README, LICENSE-MIT, .gitignore, pnpm-workspace.yaml, MCPB manifest)
+├── clients/obsidian/  THIN plugin: UI + HTTP calls only, ZERO compute
+├── docs/specs/   this document
+└── (README, LICENSE-MIT, pnpm-workspace.yaml, MCPB manifest)
 ```
 
-### Process model: standalone engine daemon + thin clients
+### Process model: standalone daemon + thin clients
+- **Daemon** (Node 22, Hono over Unix socket + loopback) owns all compute **and the accelerators**; single-instance via socket-connect probe + `proper-lockfile`. Clients are thin: Claude Code → ~40-line self-bridge over the socket; Obsidian → thin plugin via `requestUrl()` over loopback (zero compute, 60fps); Desktop/Cursor → HTTP-MCP. Single writer by topology.
 
-**The #1 Smart Connections problem: it embeds/indexes inside Obsidian's renderer → freezes the app.** VaultNexus inverts this: **one long-running engine daemon owns all compute; every UI is a thin client; idle cycles are spent thinking, not idling.**
+### The Compute backend (the single biggest power-multiplier)
+A hardware-probed accelerator behind one `core/` interface fronting **(a)** the resident embedder forward-pass, **(b)** index build, **(c)** batched distance + rescore (`sgemm`/Hamming). Probe order on macOS: **Accelerate/AMX → Metal/MPS or WebGPU(Dawn) → ANE/Core ML**; on Linux/NVIDIA: **cuVS/CAGRA**. A hardware `capability_card` mirrors the provider one. No accelerator → the backend *is* the simsimd-CPU floor (strict superset, never worse). The **resident local embedder runs on the ANE (~1ms vs ~800ms cloud)**, optionally hedged-raced against a cloud embedder — the single biggest hot-path latency win.
 
-- **`vaultnexus` engine (daemon)** — a standalone Node 22 process (HTTP server = **Hono** + `@hono/node-server`; Web-standard one-handler-for-socket-and-HTTP, zero-dep, built-in auth/CORS — the wire is ~0.05% of query latency, so chosen for ergonomics, not speed). Single-instance via a **socket-connect probe** + `proper-lockfile` heartbeat; `spawn(detached).unref()`.
-- **Dual transport:** **Unix domain socket** (Claude Code shim — 130µs, no network surface) **AND loopback HTTP** (Obsidian plugin — renderer can't reach a socket, `fetch` is CORS-blocked).
-- **Clients are thin:** Claude Code → a **~40-line self-bridge** (SDK `StdioServerTransport` + undici `{ socketPath }`, keeps it on the zero-network path; not `mcp-proxy`). Obsidian → thin plugin via `requestUrl()` over loopback, **zero compute**. Claude Desktop / Cursor → HTTP-MCP.
-- **Single writer by topology** ⇒ no concurrency/lockfile problem by construction.
+### The vector engine (OP — quantized graph, exact, scales to 1B)
+One capability-probed `VectorIndex`:
+- **Core (all platforms): usearch** (Apache, single-file, mmap view-from-disk, b1/i8/f16, SimSIMD NEON/AMX/AVX-512) running a **RaBitQ cascade**: traverse a navigable graph over **1-bit RaBitQ codes** (≈40× faster, ≈32× less RAM) → oversample 3–5× → **int8 rescore** (~99% recall) → **exact f32 refine** on the final k (recall 0.95–1.0, *exact* ranking). RaBitQ's error bound is what makes the 1-bit prune trustworthy; the f32 refine preserves the design's exact-search virtue. `usearch` is *already* the kNN-graph builder — now it is the search engine too (one structure, two jobs).
+- **GPU tier (opt-in, auto-lit on NVIDIA): cuvs-node** IVF-RaBitQ/CAGRA — beats CAGRA 1.3–5.6× QPS @0.95, builds 7.7× faster; build-on-GPU→serve-on-CPU handoff keeps instant restart.
+- **Disk tier (100M–1B, opt-in `PG_URL`): VectorChord DiskANN** (server-only) — 1B on 64 GB RAM + SSD, <3 ms, 95% recall, 15–50× less RAM than HNSW. Plain `usearch`-mmap-DiskANN covers the embeddable single-file path to ~1B.
+- **Scale switch (measured, not dogma):** binary-cascade ≤~10M (GPU/AMX-accelerated, exact) → usearch-DiskANN mmap to 1B → cuvs on NVIDIA. **DARTH declared-recall early-termination** (6.8×) + **ADSampling** (−90% dims touched) + **SPFresh** in-place updates (constant-latency at billion scale). ⚠️ binary needs ≥1024-dim → the degradation compiler defaults to int8-primary below that. Brute-force stays only as the refine kernel + the exact-filtered fallback (ACORN-style predicate traversal avoids the filtered-recall cliff).
 
-### Provider registry & router (bring-what-you-have, model-agnostic)
-
-The daemon hardcodes NO vendor. Three categories — **embed (required)**, **rerank (optional)**, **judge (host session counts)** — bound by a recommender that *measures* rather than tabulates:
-
-- **Capability negotiation:** at registration, probe each endpoint — embed one string → `.length` is the ground-truth **dims** (no OpenAI-compat endpoint exposes this); oversized request → parse error for **max-context/batch**; sniff `/rerank` and contextual list-of-lists support; test `output_dimension` for Matryoshka. Write a `capability_card`. The static cost table (LiteLLM JSON + models.dev) is demoted to a **cost hint + cold-start prior**.
-- **Vault-grounded micro-benchmark:** carve ~30 Q→note pairs from the user's own vault (built for eval anyway), score every registered embedder/reranker by **nDCG on this specific vault**, feed that as the quality prior into a **renewal-reward + LinUCB router** (`u/(1+τ/Lref)`). One mechanism delivers routing + fallback + offline + hedging.
-- **Routing scope:** embedder is **per-space** (index and query must share a model) with a fast **resident-local embedder** option for the Sentinel cull / cache pre-warm; **reranker is per-call**; **judge is a cascade**.
-- **Degradation compiler** (pure `core/` function, `capability_card → pipeline params`): no reranker → widen first-stage + lean on MMR/DPP; short-context embedder → shrink chunk target; no contextual mode → flat embed + BM25 blurb; slow provider → smaller batches. Any registry config "just works."
-- **Implementation:** **Vercel AI SDK v6 for chat/judge only** (its polyglot, low-churn surface); **own embed + rerank in ~150 LOC undici** over the daemon's pre-warmed pools (the SDK's `rerank()` is Cohere/Bedrock/Together-only and can't express contextual list-of-lists embed; the raw endpoints are 6 fields each).
-
-### Data store — lean embedded default; Postgres opt-in
-
-**Default `SqliteStore` (lean, install-nothing, no Docker, smallest air-gap bundle):**
-- **Vectors:** stored as **binary-quantized codes** (`bit`) + a quantized rescore lane (int8/`halfvec`); **searched by simsimd brute-force popcount** — ~1ms across 8 cores / ~9ms single-core / 128MB RAM at 1M×1024-dim, *beating* HNSW (5–8ms) with **zero build time, zero index corruption, instant mmap restart, and exact (not approximate) filtered search**. `vectorlite` (hnswlib-in-SQLite, SIMD) available if a graph index is ever wanted.
-- **kNN adjacency graph:** built once at index time (usearch, k≈8–16) and stored as CSR — this is the GAR/RGS expansion graph **and** the convergence/bridge edge set (shared infra).
-- **BM25 / FTS:** SQLite **FTS5 `bm25()`** (real BM25 — better-ranked than Postgres `ts_rank`).
-- **Graph + claims + cache:** **LMDB** (CSR wikilink adjacency, the Claim Index, content-hash→embedding cache, labels) — ACID, ~500K writes/s, lock-free parallel readers, mmap.
-- **Hierarchical index:** sentence / chunk / note rows discriminated by `granularity`; the sentence tier *is* the Claim Index.
-
-**Overkill tier (opt-in `PG_URL`, Linux, no Docker required):** your own Postgres + pgvectorscale (StreamingDiskANN) + pg_search/VectorChord (real BM25 + RaBitQ) for tens-of-millions. ⚠️ AGPL — separate server, never bundled.
-
-This **deletes the v2.2 #1 packaging risk** (no embedded-Postgres + hand-built pgvector pipeline) and makes the default trivially air-gappable.
+### Retrieval representation
+Hierarchical sentence/chunk/note in one index (RAPTOR collapsed-tree, `granularity` field) on the contextual-embedding substrate (used if the embedder supports it). The **note+chunk tiers also store ColBERT-style token vectors** (1–2-bit residual-quantized, ~20–36 B/token) for the multi-vector tier — gated behind the confidence escalation so storage stays bounded. The sentence tier *is* the Claim Index.
 
 ### Throughput & blazing-fast systems
+Resident on-ANE embedder (~1ms) + **predictive "slow-thinker" prefetch** keyed to the Claude Code working set (pre-embed the agent's next query → ~316×/cache-hit, erases the p90/p99 tail; FP-safe) + **τ-bounded approximate result cache** + **RCU double-buffered columnar lock-free cache** (Structure-of-Arrays feeds SimSIMD/AMX) + `undici` pre-warmed pools + `p-queue` backpressure + Piscina workers with a **SharedArrayBuffer ring buffer** (zero-copy) + speculative stage overlap. Streaming push (in-process fanout) for index progress + standing intelligence; the synchronous query stays request/response.
 
-The reframe: **~95–99% of hot-path latency is the embedding network round-trip** (200ms p50, 5s p99); local search is ~1–3ms. So speed work targets the network, not local compute.
-- **Predictive "slow-thinker" prefetch (the headline latency win):** the daemon watches the Claude Code session's working set (open files, recent edits, the `Stop`-hook stream) and **pre-embeds + pre-retrieves the agent's likely next query into the cache before it's asked** — turning "blazing fast" from a wire claim into a prediction claim (~316× on a cache hit; 75% hit rate; erases the p90/p99 embedding tail). FP-safe (a wrong prefetch costs only idle CPU).
-- **Resident local embedder option** (~10ms CPU / <100ms Apple-Silicon) as the default hot-path embed role, optionally **hedged-raced** against a cloud embedder — the single biggest latency reduction available.
-- **RCU double-buffered, columnar, lock-free hot cache** (10–30× read throughput; SIMD-dense Structure-of-Arrays feeds simsimd) + a **τ-bounded approximate result cache** (reuse a prior query's set within a similarity tolerance, near-100% recall).
-- **SIMD distance** via **simsimd** (up to 200× over scalar JS, f32/int8/binary in one dep) + **Accelerate/AMX sgemm** (~2× over NEON) for batched/all-pairs math; **declared-recall early termination** (DARTH-style) + **Extended RaBitQ** if/when a graph index is used.
-- **Index pipeline:** **Piscina** workers with a **SharedArrayBuffer ring buffer** thread→thread (zero-copy vectors); `undici` pre-warmed pools; `p-queue` backpressure + `Retry-After`.
-- **Streaming push** (in-process fanout over the socket → MCP notifications) for index progress + standing-intelligence findings; the synchronous query stays plain request/response.
+## 5. Retrieval pipeline (v3.1 — two-speed reasoning retriever)
 
-## 5. Retrieval pipeline (v3 — adaptive cascade)
+**Index time:** parse → OFM → offset-faithful hierarchical chunk → embed (contextual if supported; resident-accelerated) → store RaBitQ codes + int8/f32 rescore lanes + (note/chunk) token vectors + the deterministic BM25 blurb; build the usearch kNN graph (shared with convergence). Sentence tier = Claim Index.
 
-**Index time:** parse → OFM → offset-faithful **hierarchical chunk** (sentence / chunk / note) → embed (contextual-chunk mode if supported; resident-local or cloud) → store binary codes + rescore lane + the deterministic BM25 blurb; build the kNN adjacency graph (shared with convergence). The sentence tier becomes the Claim Index.
-
-**Query time** (hot path; zero generative LLM):
+**Query time:**
 ```
-query
- → ROUTER (cached TF-IDF/SVM + heuristics, ~0.1ms, NO embed call)
-     → strategy: α-prior, expansion on/off, rerank-disposition
- → FIRST STAGE (speculative overlap): embed(query) ‖ BM25 ‖ wikilink-CTE
-     → convex-combination fusion (TMM norm, IDF-adaptive α; RRF cold-start)
- → CONFIDENCE GATE (free, on fused scores: top1−top2 gap, lexical∩semantic, entropy)
-     ├─ HIGH → EARLY EXIT: DPP/coverage select → adaptive-k → return  (no rerank)
-     └─ LOW  → GAR/RGS adaptive expansion: rerank a batch → add kNN + wikilink
-               neighbors of cross-encoder-confirmed notes → rerank → repeat
-               (within the rerank budget) → DPP coverage → adaptive-k → return
- → cited hits { path#heading^block, snippet, score, why-retrieved }
+0. PREFETCH      speculative embed+retrieve → RCU cache         p(hit)=75% → 0ms
+1. ROUTER        cached TF-IDF/SVM (no embed) → {α, expand?, MV?, rerank tier}   ~0.1ms
+2. LOOKUP LANE (zero-LLM, the common case):
+     dense RaBitQ-cascade scan ‖ FTS5 BM25 ‖ wikilink-CTE (speculative overlap)
+     → CC/TMM fusion (online-learned weights; RRF cold-start)
+     → CONFIDENCE GATE (free, self-warming from eval rerank-ablation labels)
+        ├ HIGH → DPP coverage → adaptive-k → RETURN              ~5ms
+        └ LOW  → escalate ↓
+3. REASONING LANE (analytical / convergence / multi-hop):
+     host-session CoT query decomposition (the judge is already there)
+     → dense-seeded PPR over the kNN+wikilink graph (HippoRAG-2-grade)
+     → MUVERA-FDE multi-vector shortlist → Chamfer/MaxSim rerank   ~10–20ms
+       (breaks the proven single-vector dimensional ceiling)
+     → FIRST single-token listwise rerank on the host judge (or undici pointwise)
+     → CRAG self-correction gate {sufficient | reformulate | fetch-the-bridge}
+     → GAR/RGS frontier expansion (kNN + wikilink, weighted) within budget
+     → DPP coverage → adaptive-k
+4. cited hits { path#heading^block, snippet, score, why-retrieved, evidence-chain? }
 ```
-- **Auto mode-switch:** small/cheap-enough vault → stuff whole vault into context (prompt caching). This is a first-class path, not an afterthought.
-- The **confidence gate self-warms** from the eval harness's existing rerank-ablation labels (model-free, online).
-- **Fold-later** (behind the A/B switchboard): per-query dynamic α, online-learned fusion weights, an optional ColBERT tier on the `PG_URL` overkill backend.
+- **Auto mode-switch:** tiny vault → stuff whole vault into context (prompt caching) — first-class.
+- The reasoning lane keeps **no *mandatory* LLM in the lookup path**; its CoT/listwise calls reuse the host session the user is already paying for in an agentic loop, hidden behind prefetch/cache.
+- **Fold-later (A/B switchboard):** WARP as the MV escalation engine; learned-sparse leg for lexical-heavy vaults; full per-query dynamic α.
 
-## 6. The Sentinel (opt-in, pull-first) + Convergence (the headline)
+## 6. Convergence + Sentinel (signed belief-propagation)
 
-**Convergence/Bridge detection (headline, FP-safe, ships first).** Over the kNN/claim graph: for each high-similarity claim pair whose endpoints sit in **different** Louvain communities (with **no existing edge**), flag a bridge candidate; rank by **Bayesian surprise** (KL of the vault's belief distribution before/after — only surface bridges that *move* your thinking). This is **claim-level epistemic bridging**, distinct from InfraNodus's topic-level structural holes. A wrong bridge costs nothing.
+**Convergence/Bridge (headline, FP-safe, ships first):** over the kNN/claim graph, high-similarity claim pairs across **different** Louvain communities with **no existing edge** → bridge candidates, ranked by **Bayesian surprise** (KL of the belief distribution before/after). Claim-level epistemic bridging — and it *works* because the multi-vector tier can finally rank the conjunctive patterns convergence depends on. A wrong bridge costs nothing.
 
-**Contradiction (opt-in, pull-only, FP-gated) — Belief-State Energy Model substrate:**
-1. **Claim Index lookup** (the sentence tier).
-2. **Assertion pre-filter** (biggest precision lever): first-person, assertive, settled sentences only.
-3. **Negation/polarity router** (winkNLP + a NegEx cue lexicon, pure-TS): *force* polarity-reversed pairs forward, *veto* same-polarity look-alikes — fixes "Semantic Collapse" symbolically (dense vectors are negation-blind).
-4. **Belief-energy update:** the edit moves a belief node `bᵢ`; recompute local **dissonance `ΔH = Σⱼ ωᵢⱼ|bᵢ−bⱼ|`** over its neighborhood (edges from the wikilink graph + claim similarity, signs cached from the judge). Only edits that spike a **well-connected** cluster past τ become candidates — the connectivity gate kills the daily-note-one-liner FP class; structural **self-resolution** distinguishes *update* from *contradiction* before any LLM call.
-5. **Judge** (bias-hardened tool-result-as-judge; cascade cheap→frontier) adjudicates only the survivors and **sets the edge signs** that feed back into the energy graph.
-6. **Temporal:** record a user-confirmed **`supersedes` edge** on "it's-an-update"; **BOCPD** change-point detection narrates only confirmed, dated mind-changes; shrinking-variance runs = convergence-over-time ("you're settling").
-7. **Confirm-and-learn:** every dismissal re-fits τ per topic, online — FP rate monotonically improves.
+**Contradiction (opt-in, pull-only, FP-gated) — Signed Belief-Propagation graph with Reasoning Zones:**
+- Topic = a belief graph; node `bᵢ∈[−1,1]` = a stance; edge `ωᵢⱼ` = signed relatedness (wikilink graph + claim similarity). A **damped contractive propagation operator** computes **credibility Ψ** (a-priori source trust) and **confidence Φ** (emergent) with a **guaranteed unique fixed point** — confidence *emerges*, eliminating the per-topic edge-weight/τ dials. **Reasoning Zones** = Harary-balanced subgraphs (signed 2-coloring, linear time) where multi-hop inference is internally consistent. A contradiction = an edit that **spikes dissonance / breaks balance** in a well-connected zone (structural surprise). Connectivity gate + balance + structural self-resolution (update vs contradiction) are three FP gates that fall out free; **shock updates** adapt without oscillation.
+- Pipeline: Claim Index lookup → assertion pre-filter → **winkNLP negation/polarity router** (fixes "Semantic Collapse" — dense vectors are negation-blind) → belief-propagation update → **Judge** (bias-hardened tool-result-as-judge; cascade) adjudicates survivors and sets edge signs (closing the loop) → temporal reframe + `supersedes`/validity edges → confirm-and-learn (online).
+- **FP kill-criterion (HARD):** if FP can't beat a stated threshold (e.g. <1 false contradiction per 50 edits) on a real messy vault by end of P1.5, contradiction ships **off by default**; only convergence surfaces.
 
-**Precision is the product.** Eval's **primary metric is false-positive rate**, with a hard **kill-criterion**: if FP can't beat a stated threshold (e.g. <1 false contradiction per 50 edits) by end of P1.5, contradiction ships **off by default** and only convergence is surfaced.
+**Cited reasoning — `reason_over_vault` / `prove` (the "thinks, not just retrieves" tool):** LLM decomposes the question → BFS over the belief graph within **Reasoning Zones** → each path is an **evidence chain with `path#heading^block` provenance per hop** → the judge composes a cited answer, **refusing to reason across a flagged contradiction**. <3 s graph overhead (StepChain); LLM-on-demand only. No other tool can do this — it requires the signed belief graph.
+
+**Counterfactual belief surgery — `what_if_I_drop(X)`:** drop/reverse a claim → re-run the forward-push propagation → report which beliefs lose support, which contradictions resolve, which zones re-balance (CFKGR/COULDD). Interventional, not just descriptive.
 
 ## 7. Standing intelligence + sleep-time consolidation
 
-- **Sleep-time consolidation (the moonshot).** The daemon is idle ~99% of the time and watches the whole corpus. On idle cycles it walks recently-changed clusters, pre-computes the convergence/contradiction/energy graph, and **synthesizes a pull-based "morning brief"** of genuinely surprising syntheses (Bayesian-surprise-ranked) — *"three notes this month converge on X; here's the thesis you haven't written."* The leap from "fast search that argues" to "a second brain that thinks overnight." (Letta sleep-time compute: 18% accuracy, 2.5× cost.)
-- **Decision & Prediction Ledger (build-first new feature).** Extract forecast-claims from notes (reusing the assertion filter), record `confidence`/`resolves_when`, resurface on outcome-date/topic ("5 months ago you predicted X at 60% — how'd it go?"), and compute a **per-topic Brier score / calibration curve**. Makes the vault improve your *judgment*. Zero new always-on LLM (cosine + date math; judge narrates on demand).
-- **Grounded Steelman.** On-demand `challenge_claim`: mount the strongest counter-case grounded in *your* vault (reverse the contradiction cull + an evidence-absence check), remembering what it already challenged. "Argues back **and** keeps score."
-- **Epistemic Integrity view.** Whole-vault map: least-stable beliefs via **QBAF gradual semantics** (handles reinstatement; ~30-LOC fixpoint, no external lib), connector notes via **dense-seeded, hub-pruned PPR** importance (not plain betweenness). Built with `graphology` (sub-100ms at sparse scale; no native binary).
-- **Ambient Inbox / Capture** — push only, built **last**, opt-in, affirming-framed, gated on the FP kill-criterion.
+- **One active-inference objective:** Bayesian surprise = expected free energy ranks bridges, contradictions, steelman targets, prediction-resurfacing, **and** the prefetcher — "what will most move the user's beliefs / resolve their uncertainty?" — replacing per-feature heuristics and generating proactive questions at the vault's structural gaps.
+- **Sleep-time consolidation (the moonshot):** on idle cycles the daemon walks high-surprise clusters, pre-computes the belief/convergence graphs, and **drafts the unwritten note** ("three notes converge on X; here's the thesis, cited") as a dry-run for a pull-based morning brief — never a push (Letta sleep-time: 18% acc, 2.5× cost).
+- **Self-improving / procedural memory:** the daemon distills successful retrieval trajectories + confirm/dismiss patterns into a self-edited playbook that primes the router and Sentinel — generalizing confirm-and-learn from "tune τ" to "learn how Roger reasons." Listwise-DPO/LinUCB from implicit feedback, no GPU.
+- **Decision & Prediction Ledger:** extract forecast-claims, resurface on outcome-date/topic, per-topic **Brier calibration** (cosine + date math; judge narrates on demand).
+- **Grounded Steelman:** the strongest counter-case grounded in *your* vault (reverse the contradiction cull + evidence-absence check).
+- **Epistemic Integrity view:** least-stable beliefs via QBAF gradual semantics (incremental); connector notes via dense-seeded hub-pruned PPR; Louvain via `graphology` (no native binary).
+- **Ambient push** — last, opt-in, affirming, FP-gated.
+- **P3 cross-source life-graph:** vault + GitNexus code-graph + read-later as one belief network (G-reasoner/QuadGraph 34M graph foundation model) — uncopyable; only VaultNexus is positioned for it.
 
 ## 8. MCP surface
 
-Transport: **stdio self-bridge → daemon over Unix socket**; loopback HTTP for the plugin. All tools: `outputSchema` + `structuredContent`, correct hints. Server `instructions` (≤2 KB) front-loaded. **Streaming notifications** for index progress + standing-intelligence (not the synchronous query). **No `sampling`/`elicitation`.**
+stdio self-bridge → daemon over Unix socket; loopback HTTP for the plugin. Tools carry `outputSchema`+`structuredContent`, correct hints; `instructions` ≤2 KB front-loaded; **streaming notifications** for progress + standing intelligence. No `sampling`/`elicitation`.
 
-**Read:** `semantic_search`, `note_context` (flagship), `what_links_here`, `find_bridges` (convergence — headline), `recall_history` (git temporal), `decision_ledger` / `recall_predictions`, `challenge_claim` (steelman), `sentinel_check` (opt-in), `epistemic_report`, `vault_diff`, `vault_stats`. *(P2: `note_ripple`, `graph_query`, `tag_map`, `moc_map`.)*
+**Read:** `semantic_search`, `note_context` (flagship), `reason_over_vault` / `prove` (cited inference), `find_bridges` (convergence, headline), `what_if_i_drop` (counterfactual), `what_links_here`, `recall_history`, `decision_ledger` / `recall_predictions`, `challenge_claim` (steelman), `sentinel_check` (opt-in), `epistemic_report`, `vault_diff`, `vault_stats`. *(P2: `note_ripple`, `graph_query`, `tag_map`, `moc_map`.)*
 
-**Write** (dry-run + confirm; our own tools, FS atomic): `create_note`, `edit_note`, `safe_rename_note`. *(P2: `suggest_links`, `synthesize_moc`.)*
+**Write** (dry-run + confirm; our own tools, FS atomic): `create_note`, `edit_note`, `safe_rename_note`, `accept_draft` (the consolidation drafts). *(P2: `suggest_links`, `synthesize_moc`.)*
 
-**Resources:** `note://{path}` + `vault://index`; `listChanged` on create/delete.
-
-**HTTP security (loopback surface):** TS SDK ≥1.24.0, **bind 127.0.0.1**, `Origin`/`Host` allowlist, **bearer token on every request** (GHSA-w48q-cv73-mx4w). The socket path needs only filesystem perms.
+**HTTP security:** SDK ≥1.24.0, bind 127.0.0.1, Origin/Host allowlist, bearer token (GHSA-w48q-cv73-mx4w). Socket path = filesystem perms only.
 
 ## 9. Offline build & dependency centralization
 
-**"Offline" = easy offline BUILD + local-first vault DATA.** Local-first registry (local embedder + reranker + judge) = a true air-gapped runtime and the **privacy default** for the Obsidian crowd; a cloud registry is the max-quality opt-in. Privacy is stated per provider (with cloud, note text leaves at index/query time).
+Local-first registry (local accelerated embedder + reranker + judge) = a true air-gapped runtime and the **privacy default**; cloud is the max-quality opt-in (privacy stated per provider).
+- **Offline build:** pnpm `catalog:` + committed lockfile; `pnpm fetch` → offline `--frozen-lockfile` on pinned pnpm `11.0.7`; CI cold-store cross-arch. Native deps: **`better-sqlite3`/`sqlite-vec` (or `vectorlite`), `usearch`, `lmdb`, `simsimd`**, + the Compute backend (WebGPU-via-Dawn prebuilt arm64; Accelerate/Core ML in-OS; cuvs-node only on NVIDIA boxes) — all prebuilt; **no embedded-Postgres, no pgvector pipeline**.
+- **Runtime = the registry** (no ML bundled; local models are the user's own, run accelerated in the daemon).
+- **Always local:** vault, index, graphs (kNN/wikilink/claim/belief), all deterministic code.
+- **Distribution:** MCPB (per-platform, vendored) primary; `npx` convenience. Secrets via env, never committed.
 
-1. **Offline build** — pnpm `catalog:` + committed lockfile; `pnpm fetch` → offline `--frozen-lockfile` install on pinned pnpm `11.0.7`; CI cold-store cross-arch. Native deps = **`better-sqlite3`/`sqlite-vec` (or `vectorlite`), `simsimd`, `usearch`, `lmdb`** — all with prebuilt binaries; **no embedded-Postgres, no hand-built pgvector pipeline** (the lean store deletes that risk).
-2. **Runtime = the registry** — three roles bound to whatever the user registered; no ML bundled.
-3. **Always local:** the vault, the index, the link/claim/kNN graphs, all deterministic code (parser, chunker, fusion, energy model, BOCPD, git).
+## 10. Explicitly rejected / un-rejected (kept for the record)
 
-**Distribution:** MCPB bundle (per-platform, vendored) = primary; `npx -y @vaultnexus/mcp` = convenience.
-**Secrets:** keys via env (`VOYAGE_API_KEY`), never committed.
+**Un-rejected by the OP pass (the minimalist pass wrongly killed these):** ANN/graph index as the engine (RaBitQ-graph beats brute-force on every axis); GPU/Metal/ANE acceleration (the resident-embedder + 100M-scale goals require it); RaBitQ quantization; **multi-vector late-interaction** (the only architecture past the proven single-vector ceiling); **dense-seeded PPR as a retrieval signal** (HippoRAG-2-grade); a **reasoning lane with a routed LLM** (BRIGHT +12.2 nDCG — but only on the escalation path, never the lookup path).
 
-## 10. Explicitly rejected (kept for the record)
-
-- **Embedded-PostgreSQL as the default store** — packaging minefield (`-march=native`, npm symlinks, no Windows-full), MVCC solves a designed-away problem; demoted to opt-in `PG_URL`.
-- **HNSW/ANN index for search at ≤1M** — binary brute-force is faster with no build/corruption/restart cost; a kNN *adjacency* graph is still built (for expansion/convergence), which is different.
-- **Persistent bi-temporal LLM fact graph** — the deterministic Claim Index + `supersedes` edges replace it.
-- **Contradiction as the headline / push-by-default UX** — REFNLI false-contradiction rates + "When Help Backfires" → convergence-led, pull-first, FP-gated.
-- **SPLADE / learned-sparse third leg** — GPU-bound, domain-fragile, tokenizer-destructive on personal jargon; contextual-dense is the learned-expansion leg minus the cost.
-- **HippoRAG entity-seeded PPR** (hub-bias) — but dense-seeded, hub-pruned PPR is restored for the bridge/Epistemic view.
-- **Proposition indexing for retrieval** — LLM index tax + breaks provenance; kept only as the Claim Index.
-- **HyDE / query rewriting / GraphRAG build / manual Contextual Retrieval** — LLM in the hot/index path for low marginal value.
-- **SEDA, io_uring, query compilation, Arrow-everything, GPU hot-path rescore, product quantization, plain msgpackr on the wire, Bun/Deno, uWebSockets.js, ngraph-native** — each trades a real constraint for throughput this workload never uses (the wire is ~0.05% of latency).
-- **MCP `sampling` / `elicitation`** — unsupported.
-- **Forking `cyanheads/obsidian-mcp-server`** — vendor its edit-tool module (Apache-2.0).
+**Still rejected:** **naive Product Quantization** (RaBitQ dominates); **full PLAID** (MUVERA/WARP dominate on CPU); **embedded-Postgres as default** (→ opt-in); **brute-force as the *engine*** (→ refine kernel only); **HyDE / blind query rewriting / GraphRAG LLM-build**; **test-time-compute reasoning rerankers in the hot path** (→ sleep-time consolidation only); **SPLADE as a default** (A/B opt-in for lexical-heavy vaults); proposition-for-retrieval; persistent bi-temporal LLM fact graph; **push-by-default UX**; SEDA / io_uring / query-compilation / Arrow-on-the-wire / Bun-Deno; MCP `sampling`/`elicitation`; `mcp-proxy` dep; forking cyanheads (vendor the module).
 
 ## 11. Evaluation
 
-- Golden **Q→note** set from the user's own vault (also seeds the provider micro-benchmark); Recall@k, **MRR**, **NDCG@10** — hand-rolled TS, validated once against the **`pytrec_eval`** dev oracle (MRR = `recip_rank`). Don't add ranx/ir-measures/BEIR.
-- A/B switchboard (dense / +BM25 / +CC-fusion / +GAR expansion / +DPP / +rerank) → the failure-rate ladder (and the confidence gate's self-warming labels); bootstrap CI + paired permutation on `simple-statistics`.
-- **Sentinel FP rate = primary metric**, with the hard **kill-criterion** above and a "messy notes" negative set. Judge/Sentinel quality = a TS reimpl of the RAGAS prompts (from autoevals, MIT). **promptfoo rejected** (84 deps + a second `better-sqlite3`).
-- **Convergence/Bridge precision** + **Decision-Ledger calibration (Brier)** = secondary metrics.
+- Golden **Q→note** set (also seeds the provider micro-benchmark) + a **LIMIT-style conjunctive negative set** (proves the multi-vector tier earns its keep on the queries single-vector can't rank); Recall@k, **MRR** (`recip_rank`), **NDCG@10** — hand-rolled TS validated once vs **`pytrec_eval`** (1e-6).
+- A/B switchboard: `dense → +bm25 → +CC-online-fusion → +PPR → +MUVERA → +FIRST → +CRAG` → the failure-rate ladder; its labels self-warm the confidence gate **and** train the online fusion weights.
+- **Sentinel FP = primary metric** + the hard kill-criterion + the 8-category messy negative set. **Convergence precision** + **Decision-Ledger Brier** + **reasoning-chain faithfulness** = secondary. RAGAS reimpl on the Judge (autoevals prompts). promptfoo rejected.
+- Per-run manifest: graph source + every model-id + golden hash + seed. CI smoke-eval on a fixture vault.
 
 ## 12. Phasing
 
-- **P0 — scaffold (de-risked):** Node 22 package, pnpm catalog, the `Store` interface + `SqliteStore` (sqlite-vec/vectorlite + FTS5 + LMDB + usearch), `simsimd` brute-force scan, `core` interfaces, hierarchical chunker (chonkie-ts pinned + offset round-trip contract test), config, CI cold-store cross-arch. **Spikes:** ① provider capability-probe + round-trip via the registry (one API + one OpenAI-compat local); ② brute-force scan latency at target vault size; ③ resident-local-embedder warm path. *(The embedded-Postgres bundling spike is gone — risk deleted.)*
-- **P1 — retrieval base:** incremental hash-cache index, hierarchical small-to-big, contextual embeddings (if supported), CC+TMM fusion (IDF-adaptive) + per-query gate + **GAR/RGS expansion** + DPP coverage + adaptive-k + confidence-gate cascade, own-embed/rerank undici clients, vault-grounded micro-benchmark router + degradation compiler, RCU cache + predictive prefetch, `semantic_search`/`note_context`/`what_links_here`/`create_note`/`edit_note`, eval harness, stdio self-bridge MCP server.
-- **P1.5 — the differentiators:** 🎯 **Convergence/Bridge (`find_bridges`)** first; then the **Decision & Prediction Ledger**; then **Grounded Steelman**; then the opt-in **Sentinel** (energy model + negation router + cascade judge + `supersedes` + online τ-calibration) behind the FP kill-criterion; `recall_history`, `safe_rename_note`.
-- **P2 — standing + consolidation:** **sleep-time consolidation / morning brief**, **Epistemic Integrity** (QBAF + dense-seeded PPR), BOCPD drift narration, streaming push, MCPB bundle, optional Obsidian plugin, remaining read tools, Ambient Inbox/Capture (opt-in, FP-gated).
-- **P3 / moonshot:** cross-source life-graph (vault + GitNexus code-graph + read-later), learned per-user fusion weights, optional ColBERT tier, multimodal.
+- **P0 — scaffold + de-risk:** Node 22 package, pnpm catalog, `VectorIndex` + `SqliteStore` (sqlite-vec/usearch + FTS5 + LMDB), the **Compute backend** (CPU floor + one accelerator path), **RaBitQ cascade**, `core` interfaces, hierarchical chunker (+ offset contract test), config, CI cold-store. **Spikes:** ① capability-probe + registry round-trip; ② RaBitQ-cascade latency/recall at 1M/10M; ③ resident-accelerated-embedder warm path (ANE/Metal); ④ binary-needs-≥1024-dim degradation; ⑤ belief-propagation FP on a real vault vs the kill-criterion.
+- **P1 — OP retrieval base:** quantized-graph engine + GPU tier auto-detect, hierarchical index, contextual embeddings, **lookup lane** (CC online-learned fusion + DPP + adaptive-k + confidence cascade), own-embed/rerank undici (instruction-following), vault-grounded router + degradation compiler, RCU cache + predictive prefetch, core read/write tools, eval harness (incl. LIMIT set), stdio self-bridge.
+- **P1.5 — reasoning + differentiators:** the **reasoning lane** (CoT → PPR → **MUVERA multi-vector** → **FIRST listwise** → CRAG); **Convergence (`find_bridges`)** first; **`reason_over_vault`**; the **Decision & Prediction Ledger**; **Grounded Steelman**; the opt-in **Sentinel** (signed belief-propagation + negation router + `supersedes`/validity edges) behind the FP kill-criterion; `recall_history`, `safe_rename_note`.
+- **P2 — standing + scale + self-improvement:** `what_if_i_drop` counterfactual; **self-improving** DPO/procedural memory; **sleep-time consolidation + note-drafting**; **scale tiers** (usearch-DiskANN, cuvs/CAGRA build, DARTH, SPFresh); Epistemic Integrity (QBAF + PPR); BOCPD drift; streaming push; MCPB bundle; optional Obsidian plugin; Ambient (opt-in, FP-gated).
+- **P3 / moonshot:** cross-source life-graph (vault + GitNexus + read-later), multimodal/ColPali retrieval, learned graph foundation model resident in the daemon.
 
 ## 13. Open questions
 
-- **Brute-force vs usearch-HNSW crossover:** measure where the binary brute-force scan stops being interactive on weak hardware (likely well past 1M on x86, maybe ~2M on slow Apple cores) and the kNN graph should also serve search.
-- **Belief-energy edge weights & τ:** how to set `ωᵢⱼ` (wikilink vs similarity blend) and the dissonance threshold for low FP — calibrate on the golden + negative sets.
-- **Resident-local-embedder default?** Is local embed-by-default (cloud hedged) the right privacy+latency posture, or cloud-default with local opt-in? Decide from the micro-benchmark on real hardware.
-- **FP kill-criterion threshold:** the exact "false contradictions per N edits" gate that contradiction must beat to ship on by default.
-- **Sleep-time consolidation budget:** how much idle CPU/API spend per night, and the morning-brief surface (note vs tool vs plugin view).
-- **Headless graph parity vs `metadataCache`** — measure divergence; document known-unequal cases (shortest-path, case-fold, embeds).
+- **Binary-dim threshold + MV storage budget:** confirm the ≥1024-dim binary floor and the token-vector storage ceiling (gate MV strictly behind confidence escalation).
+- **FDE-vs-WARP crossover:** does MUVERA-FDE recall suffice on a real vault, or is the WARP engine needed? (build FDE first; WARP = documented escalation.)
+- **Reasoning-lane latency budget:** the p95 target for the escalation path and the router threshold that sends queries to it.
+- **Belief-propagation params:** credibility priors Ψ per source-zone; validate convergence + FP on the golden + negative sets (far fewer dials than the energy model, but Ψ needs setting).
+- **Resident-embedder default:** local-accelerated-by-default (cloud hedged) vs cloud-default — decide from the on-hardware micro-benchmark.
+- **Scale crossover:** measured binary-cascade → DiskANN → GPU switch points on real hardware.
+- **Headless graph parity vs `metadataCache`** — measure divergence; document known-unequal cases.

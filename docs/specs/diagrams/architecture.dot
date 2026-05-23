@@ -1,98 +1,116 @@
 digraph VaultNexus {
   rankdir=TB; bgcolor="white"; compound=true;
   graph [dpi=200, fontname="Helvetica-Bold", fontsize=16, labeljust="l",
-         margin=18, ranksep=1.1, nodesep=0.55];
+         margin=22, ranksep=1.3, nodesep=0.6];
   node  [fontname="Helvetica", fontsize=13, shape=box, style="rounded,filled",
-         penwidth=1.2, color="#888888", fillcolor="#ffffff", margin="0.18,0.10"];
+         penwidth=1.2, color="#888888", fillcolor="#ffffff", margin="0.20,0.12"];
   edge  [fontname="Helvetica", fontsize=11, color="#555555"];
 
-  /* THIN CLIENTS */
+  /* thin clients */
   subgraph cluster_clients {
     label="THIN CLIENTS  ·  zero embed / index / search";
     style="rounded,filled"; color="#9cc7f0"; fillcolor="#eaf4ff"; fontcolor="#0b4a82";
     fontsize=15;
     cc    [label="Claude Code\nstdio self-bridge → Unix socket\n(~40-line shim)"];
-    obs   [label="Obsidian  thin plugin\nloopback HTTP · 60fps · zero compute"];
+    obs   [label="Obsidian  thin plugin\nloopback · 60fps · zero compute"];
     other [label="Claude Desktop / Cursor\nHTTP-MCP"];
     {rank=same; cc; obs; other;}
   }
 
-  /* IPC layer */
-  ipc [label="Unix domain socket  (default · 130µs · no network surface)\n+  loopback HTTP  (hardened: 127.0.0.1 · Origin allowlist · bearer token)",
+  /* IPC */
+  ipc [label="Unix socket (130µs)  +  loopback HTTP (hardened)\n127.0.0.1 · Origin allowlist · bearer token",
        shape=note, fillcolor="#fff7d6", color="#e0c200", fontsize=12,
        margin="0.22,0.12"];
 
-  /* ENGINE */
+  /* engine */
   subgraph cluster_engine {
-    label="VAULTNEXUS ENGINE  (daemon · 100% CPU · SINGLE WRITER)";
+    label="VAULTNEXUS ENGINE  (daemon · 100% CPU+GPU · SINGLE WRITER)";
     style="rounded,filled"; color="#74c98c"; fillcolor="#e9fbef"; fontcolor="#0d5a2a";
     fontsize=15;
 
     mcp   [label="MCP surface\ntools · resources · streaming notifications",
            fillcolor="#f2fff6"];
 
-    idx   [label="Indexer\nwatch → parse → hierarchical chunk\n[sentence / chunk / note] → embed\n→ Claim Index  +  kNN graph",
+    idx   [label="Indexer\nwatch → parse → hierarchical chunk [sentence/chunk/note]\n→ embed → Claim Index  +  kNN graph  +  MV token vectors",
            fillcolor="#f2fff6"];
 
-    ret   [label="Retriever — ADAPTIVE CASCADE\nrouter → CC/TMM fusion → confidence gate\n→ GAR/RGS expansion → DPP → adaptive-k",
+    ret   [label="Retriever — TWO-SPEED\nLOOKUP LANE: RaBitQ scan ‖ BM25 → CC/TMM online-fusion → confidence gate → DPP\nREASONING LANE: CoT → PPR → MUVERA multi-vector → FIRST listwise → CRAG → GAR/RGS → DPP",
            fillcolor="#f2fff6"];
 
-    conv  [label="Convergence / Bridge engine\nHEADLINE · FP-safe · Bayesian-surprise\n(claim-level epistemic bridging)",
+    conv  [label="Convergence / Bridge\nHEADLINE · Bayesian-surprise · FP-safe\n(claim-level epistemic bridging)",
            fillcolor="#f2fff6"];
 
-    sen   [label="Sentinel  (opt-in · pull-only)\nBelief-Energy  H=Σω|bᵢ−bⱼ|\nwinkNLP negation · BOCPD drift",
+    sen   [label="Sentinel  (opt-in · pull-only)\nSIGNED BELIEF-PROPAGATION + Reasoning Zones\nwinkNLP negation · BOCPD drift  ·  guaranteed-unique fixed point",
            fillcolor="#f2fff6"];
 
-    ledger [label="Decision & Prediction Ledger\nBrier calibration · per-topic scores",
+    reason [label="reason_over_vault (cited inference)\nwhat_if_i_drop (counterfactual surgery)",
             fillcolor="#f2fff6"];
 
-    sleep [label="Sleep-time consolidation\nidle → morning brief\n(Bayesian-surprise-ranked syntheses)",
+    ledger [label="Decision & Prediction Ledger\nBrier calibration · per-topic scores\nGrounded Steelman",
+            fillcolor="#f2fff6"];
+
+    sleep [label="Sleep-time consolidation\nidle → DRAFTS the unwritten note → morning brief\n(Bayesian-surprise-ranked syntheses)",
            fillcolor="#f2fff6"];
 
-    rcu   [label="RCU lock-free cache\n+  predictive slow-thinker prefetch",
+    self  [label="Self-improving\nDPO from confirm/dismiss · procedural memory\n(LinUCB; no GPU; no retraining)",
+           fillcolor="#f2fff6"];
+
+    rcu   [label="RCU lock-free cache  +  predictive slow-thinker prefetch",
            fillcolor="#f2fff6"];
 
     {rank=same; idx; ret; conv;}
-    {rank=same; sen; ledger;}
+    {rank=same; sen; reason;}
+    {rank=same; ledger; sleep; self;}
   }
 
-  /* LEAN STORE */
-  subgraph cluster_store {
-    label="LEAN STORE  (install-nothing default)";
+  /* compute backend */
+  subgraph cluster_compute {
+    label="COMPUTE BACKEND  (hardware-probed · degrades to simsimd-CPU floor · no Docker)";
+    style="rounded,filled"; color="#f0a875"; fillcolor="#fff6ee"; fontcolor="#7a3000";
+    fontsize=14;
+    amx   [label="Accelerate / AMX", fillcolor="#fff0e0"];
+    metal [label="Metal / MPS / WebGPU (Dawn)", fillcolor="#fff0e0"];
+    ane   [label="ANE / Core ML\nresident embedder  ~1ms", fillcolor="#fff0e0"];
+    cuvs  [label="cuVS / CAGRA\n(NVIDIA)", fillcolor="#fff0e0"];
+    {rank=same; amx; metal; ane; cuvs;}
+  }
+
+  /* vector engine */
+  subgraph cluster_vec {
+    label="OP VECTOR ENGINE  (brute-force = refine kernel only)";
     style="rounded,filled"; color="#a86fd8"; fillcolor="#f8f2ff"; fontcolor="#4a1580";
     fontsize=15;
 
-    sv    [label="sqlite-vec / vectorlite  +  FTS5 bm25()",
+    rabq  [label="usearch RaBitQ cascade\nbinary→int8→exact-f32  ·  exact + ~1ms  ·  scales 1B",
            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
-    ssmd  [label="simsimd binary brute-force\n(NO ANN at ≤1M · ~1ms@8-core)",
+    cuvsi [label="cuvs IVF-RaBitQ / CAGRA\nGPU tier  (auto-lit on NVIDIA)",
            shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
-    usrch [label="usearch  kNN adjacency graph\n(expansion + convergence edges)",
-           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
-    lmdb  [label="LMDB\nCSR wikilink graph · Claim Index · cache",
-           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
-
-    pgopt [label="Postgres + pgvectorscale + pg_search\n(opt-in PG_URL only · AGPL · your server)",
+    disk  [label="VectorChord DiskANN\n100M–1B  ·  opt-in",
            shape=cylinder, fillcolor="#ede9ff", color="#7a56c8", style="dashed,filled"];
+    fts   [label="FTS5  bm25()",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
+    lmdb  [label="LMDB\nCSR wikilink graph · Claim Index · MV tokens · cache",
+           shape=cylinder, fillcolor="#f3e9ff", color="#a86fd8"];
 
-    {rank=same; sv; ssmd; usrch; lmdb;}
+    {rank=same; rabq; cuvsi; disk;}
+    {rank=same; fts; lmdb;}
   }
 
-  /* PROVIDER REGISTRY */
+  /* provider registry */
   subgraph cluster_reg {
-    label="PROVIDER REGISTRY  ·  3 model-agnostic roles  ·  bring-what-you-have";
-    style="rounded,filled"; color="#f0a875"; fillcolor="#fff1e8"; fontcolor="#9a4a16";
+    label="PROVIDER REGISTRY  ·  3 model-agnostic roles\ncapability probing + vault-grounded micro-benchmark router";
+    style="rounded,filled"; color="#e8a0d0"; fillcolor="#fdf0f8"; fontcolor="#7a1060";
     fontsize=15;
-
-    emb   [label="1.  Embedding model  (required)\ncontextual if supported · resident-local option\ncapability probe + vault micro-benchmark router",
-           fillcolor="#fff8f2"];
-    rr    [label="2.  Reranker  (optional → graceful skip)\nown ~150-LOC undici client\nVoyage · Cohere · Jina · local",
-           fillcolor="#fff8f2"];
-    judge [label="3.  LLM / Judge\nhost session zero-key  OR  any model\ncascade cheap→frontier · AI SDK v6 (chat/judge only)",
-           fillcolor="#fff8f2"];
+    emb   [label="1.  Embedding  (required)\nresident-local accel option",
+           fillcolor="#fef4fc"];
+    rr    [label="2.  Reranker  (optional)\ninstruction-following · own undici",
+           fillcolor="#fef4fc"];
+    judge [label="3.  LLM / Judge\nhost session zero-key · cascade · AI SDK",
+           fillcolor="#fef4fc"];
     {rank=same; emb; rr; judge;}
   }
 
-  /* VAULT */
+  /* vault */
   subgraph cluster_vault {
     label="VAULT  ·  local · your data";
     style="rounded,filled"; color="#b5b5b5"; fillcolor="#f2f2f2"; fontcolor="#333333";
@@ -108,39 +126,52 @@ digraph VaultNexus {
   other -> ipc;
   ipc   -> mcp;
 
-  mcp   -> idx;
-  mcp   -> ret;
-  mcp   -> conv;
-  mcp   -> sen;
-  mcp   -> ledger;
-  mcp   -> sleep;
+  mcp -> ret;
+  mcp -> conv;
+  mcp -> sen;
+  mcp -> reason;
+  mcp -> ledger;
+  mcp -> sleep;
+  mcp -> idx [style=invis];
 
-  /* engine ↔ store */
-  idx  -> sv    [dir=both];
-  idx  -> lmdb  [dir=both];
-  ret  -> sv    [dir=both];
-  ret  -> usrch [dir=both];
-  conv -> usrch [dir=both];
-  conv -> lmdb  [dir=both];
-  sen  -> lmdb  [dir=both];
+  /* engine ↔ vector engine */
+  idx   -> rabq  [dir=both];
+  idx   -> lmdb  [dir=both];
+  idx   -> fts   [dir=both];
+  ret   -> rabq  [dir=both];
+  ret   -> fts   [dir=both];
+  ret   -> lmdb  [dir=both];
+  conv  -> lmdb  [dir=both];
+  sen   -> lmdb  [dir=both];
   ledger -> lmdb [dir=both];
-  sleep -> sv   [dir=both];
-  sleep -> lmdb [dir=both];
-  rcu  -> sv    [style=dashed, label="hot cache"];
+  sleep  -> rabq  [dir=both];
+  sleep  -> lmdb  [dir=both];
+
+  /* engine ↔ compute */
+  idx   -> amx   [dir=both];
+  idx   -> ane   [dir=both];
+  ret   -> metal [dir=both];
+  ret   -> cuvs  [dir=both];
+  rcu   -> amx   [dir=both, style=dashed];
 
   /* engine → registry */
-  ret  -> emb   [label="embed(query)"];
-  ret  -> rr    [label="rerank"];
-  sen  -> judge [label="adjudicate"];
-  idx  -> emb   [label="embed(doc)"];
+  ret   -> emb   [label="embed/rerank"];
+  idx   -> emb   [label="embed(doc)"];
+  sen   -> judge [label="judge"];
+  reason -> judge [label="judge"];
 
   /* push registry below engine */
-  sv    -> emb  [style=invis];
+  rabq  -> emb  [style=invis];
   lmdb  -> judge [style=invis];
 
   /* vault edges */
-  emb  -> md    [style=invis];
-  md   -> idx   [label="watch", style=dashed, constraint=false];
-  git  -> sen   [label="log -G / supersedes", style=dashed, constraint=false];
-  sen  -> md    [label="FS write", style=dashed, constraint=false];
+  md  -> idx  [label="watch", style=dashed, constraint=false];
+  git -> sen  [label="supersedes/validity", style=dashed, constraint=false];
+  sen -> md   [label="FS write / drafts", style=dashed, constraint=false];
+  sleep -> md [label="draft note", style=dashed, constraint=false];
+
+  /* keep tall */
+  mcp    -> idx   [style=invis];
+  emb    -> md    [style=invis];
+  judge  -> git   [style=invis];
 }
