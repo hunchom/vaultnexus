@@ -12,6 +12,6 @@ export function defaultLockPath(): string {
 }
 
 /** Persistent embedding cache DB (survives reboot, unlike tmpdir). 'off' disables. */
-export function defaultCachePath(): string {
-  return process.env.VAULTNEXUS_CACHE ?? join(homedir(), '.vaultnexus', 'embeddings.db');
+export function defaultCachePath(env: Record<string, string | undefined> = process.env): string {
+  return env.VAULTNEXUS_CACHE ?? join(homedir(), '.vaultnexus', 'embeddings.db');
 }

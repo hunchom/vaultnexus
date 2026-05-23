@@ -20,6 +20,8 @@ async function main(): Promise<void> {
   process.stderr.write(`eval: embedder=${embedder.constructor.name} dims=${embedder.dimensions}\n`);
 
   const r = await runEval(corpusDir, embedder, GOLD_QUERIES, 10);
+  const ec = embedder as { close?: () => void };
+  if (typeof ec.close === 'function') ec.close(); // checkpoint cache WAL before exit
   process.stdout.write(
     `\nqueries=${r.queries}  recall@1=${r.recallAt1.toFixed(3)}  recall@3=${r.recallAt3.toFixed(3)}` +
       `  recall@10=${r.recallAt10.toFixed(3)}  nDCG@10=${r.ndcgAt10.toFixed(3)}  MRR=${r.mrr.toFixed(3)}\n\n`,

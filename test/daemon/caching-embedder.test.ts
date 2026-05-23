@@ -22,6 +22,7 @@ describe('CachingEmbedder', () => {
     const second = await ce.embed(['beta', 'gamma']);
     expect(base.embedded).toEqual(['alpha', 'beta', 'gamma']); // only gamma newly embedded
     expect(Array.from(second[0])).toEqual(Array.from(first[1])); // beta vec stable from cache
+    ce.close();
   });
   it('namespace (model) scopes the cache — different model re-embeds', async () => {
     const cache = new EmbeddingCache(tmpDb());
@@ -30,5 +31,6 @@ describe('CachingEmbedder', () => {
     const b2 = new CountingEmbedder(16);
     await new CachingEmbedder(b2, cache, 'modelB').embed(['x']);
     expect(b2.embedded).toEqual(['x']); // modelB miss despite same text
+    cache.close();
   });
 });

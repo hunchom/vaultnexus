@@ -9,7 +9,8 @@ export class CachingEmbedder implements Embedder {
   get dimensions(): number { return this.base.dimensions; }
 
   private key(text: string): string {
-    return createHash('sha256').update(this.namespace).update('\0').update(text).digest('hex');
+    const ns = createHash('sha256').update(this.namespace).digest('hex'); // fixed 64-char prefix → boundary unambiguous even with NUL in ns/text
+    return createHash('sha256').update(ns).update(text).digest('hex');
   }
 
   async embed(texts: string[]): Promise<Float32Array[]> {

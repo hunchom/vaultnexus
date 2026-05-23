@@ -14,7 +14,7 @@ export async function selectEmbedder(env: Env = process.env): Promise<Embedder> 
   if (baseURL && apiKey && model) {
     const e = new OpenAIEmbedder({ baseURL, apiKey, model });
     await e.probe();
-    const cachePath = env.VAULTNEXUS_CACHE ?? defaultCachePath();
+    const cachePath = defaultCachePath(env); // respects injected env, not just process.env
     if (cachePath === 'off') return e; // escape hatch — no persistence
     return new CachingEmbedder(e, new EmbeddingCache(cachePath), model); // model = cache namespace
   }

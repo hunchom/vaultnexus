@@ -19,6 +19,7 @@ async function main(): Promise<void> {
 
   // Forward-ref: reassigned to full handler after servers start.
   let shutdown: () => Promise<void> = async () => process.exit(1);
+  let shuttingDown = false; // guard against double SIGINT/SIGTERM
 
   // single-writer guard → exit 1 if another daemon holds the lock
   const release = await acquireSingleInstanceLock(lockPath, (err) => {
@@ -62,6 +63,8 @@ async function main(): Promise<void> {
     new Promise<void>((resolve) => http.close(() => resolve()));
 
   shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     await Promise.all([closeSocketServer(), closeHttp()]).catch(() => {/* still clean up */});
     if (existsSync(socketPath)) rmSync(socketPath);
     const e = embedder as { close?: () => void };
