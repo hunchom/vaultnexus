@@ -8,6 +8,9 @@ import { acquireSingleInstanceLock, lockFailureMessage } from './lock.js';
 import { createMcpServer } from './mcp-server.js';
 import { SocketServerTransport } from './socket-transport.js';
 import { createHttpApp } from './http.js';
+import { selectEmbedder } from './select-embedder.js';
+import { VaultIndex } from './vault-index.js';
+import { indexVault } from './indexer.js';
 
 async function main(): Promise<void> {
   const socketPath = defaultSocketPath();
@@ -29,9 +32,17 @@ async function main(): Promise<void> {
   // Remove stale socket from prior crash to avoid EADDRINUSE.
   if (existsSync(socketPath)) rmSync(socketPath);
 
+  const embedder = await selectEmbedder();
+  const index = new VaultIndex(embedder);
+  const vaultDir = process.env.VAULTNEXUS_VAULT;
+  if (vaultDir) {
+    const n = await indexVault(vaultDir, index);
+    process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);
+  }
+
   const socketServer = createServer((socket: Socket) => {
     const transport = new SocketServerTransport(socket);
-    const mcp = createMcpServer();
+    const mcp = createMcpServer({ index: vaultDir ? index : undefined });
     mcp.connect(transport).catch((e) =>
       process.stderr.write(`vaultnexus: connection failed ${String(e)}\n`),
     );
