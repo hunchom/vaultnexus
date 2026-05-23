@@ -147,11 +147,26 @@ export function buildNoteGraph(notes: Array<{ path: string; links: string[] }>):
   return g;
 }
 
-/** Louvain communities → notePath → communityId. Singletons (no edges) get their own id. */
+/** Louvain communities → notePath → communityId. Edgeless graph → each node its own id (louvain may throw on no edges). */
 export function detectCommunities(graph: Graph): Map<string, number> {
+  if (graph.size === 0) {
+    let i = 0;
+    const m = new Map<string, number>();
+    graph.forEachNode((n) => m.set(n, i++));
+    return m;
+  }
   const mapping = louvain(graph) as Record<string, number>; // node → community number
   return new Map(Object.entries(mapping));
 }
+```
+
+Add a test for the edgeless case in Step 2:
+```typescript
+  it('edgeless graph → every node its own community (no throw)', () => {
+    const comm = detectCommunities(buildNoteGraph([{ path: 'p.md', links: [] }, { path: 'q.md', links: [] }]));
+    expect(comm.get('p.md')).not.toBe(comm.get('q.md'));
+    expect(comm.size).toBe(2);
+  });
 ```
 
 - [ ] **Step 4: Run → PASS.** Louvain is deterministic on these disjoint inputs; if a seed is needed for determinism, pass `louvain(graph, { rng: () => 0.5 })` or the library's seed option — confirm tests are stable across 3 runs. `pnpm typecheck` (0).
