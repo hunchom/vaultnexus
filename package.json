@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev:daemon": "tsx src/daemon/main.ts",
-    "dev:bridge": "tsx src/bridge/main.ts"
+    "dev:bridge": "tsx src/bridge/main.ts",
+    "eval": "tsx src/eval/run.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
