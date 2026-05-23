@@ -43,7 +43,8 @@ White space, verified against the 2026 landscape: (a) frontier semantic retrieva
 | Vehicle | **One headless Node package, stdio MCP** | Monorepo + plugin-first — over-rotated; renderer can't host models; stdio sidesteps the HTTP DNS-rebinding CVE; plugin's only edge (canonical graph) ~90% recovered by a parser |
 | Language | **TypeScript** | — |
 | Store | **SQLite + sqlite-vec + FTS5** (vectors + BM25 + RRF; relational link + claim tables; CTE traversal) | Orama — chosen only for the renderer constraint we removed; 512 MB snapshot ceiling, no locking, last-write-wins data loss. Kept as a pure-JS fallback only |
-| Embeddings | **Nomic `nomic-embed-text-v1.5`** (768-dim, Ollama-local default / Nomic Atlas API); Voyage/OpenAI optional | per user; open weights, runs local, task-prefix asymmetry. bge-m3/Voyage-as-default dropped |
+| Embeddings | **Nomic Atlas API** (`nomic-embed-text-v1.5`, 768-dim, `task_type` prefix) — **API only, no local embedding model** | per user 2026-05-23: no non-API embedding LLM. Ollama-local + bge-m3 dropped |
+| Sentinel cull | **embedding-similarity** (Nomic API) → Judge | local DeBERTa NLI — dropped (API-only ML; kills the ONNX risk + transformers.js/onnxruntime) |
 | Reranker | **Voyage rerank-2.5 always** (assume API reachable, even in local-first mode) | local cross-encoder — dropped per user; Voyage assumed available at runtime |
 | Sentinel judge | **`Judge` interface**: tool-result-as-judge (default, zero-key) / direct-API / local-LLM | **MCP `sampling`** — dead in Claude Code/Desktop, deprecated protocol-wide |
 | First-run config | **config file** (+ plugin settings UI later) | **MCP `elicitation`** — unsupported in flagship clients |
@@ -64,8 +65,8 @@ vaultnexus/   ONE Node package (pnpm; catalog centralizes dep versions)
 │   │               VaultReader, VaultWriter, LinkGraphSource)
 │   ├── store/     SQLite (sqlite-vec + FTS5): chunk vectors, BM25, link table,
 │   │              claim table, content-hash cache. Single .db file per vault.
-│   ├── providers/ Nomic embeddings (Ollama/Atlas) [Voyage/OpenAI optional];
-│   │              Voyage rerank-2.5; Judge backends; local DeBERTa NLI cull
+│   ├── providers/ Nomic Atlas API embeddings; Voyage rerank-2.5 API;
+│   │              tool-result Judge. NO local ML models (no Ollama/ONNX).
 │   ├── server/    stdio MCP server (tools, resources, instructions)
 │   └── index/     FS walk + chunker + parser + chokidar watcher + hash-cache
 ├── docs/specs/    this document
@@ -105,8 +106,8 @@ query
 **Contradiction detection** — on note create/edit, or on-demand `sentinel_check`:
 1. **Claim Index lookup** — retrieve semantically-related prior *claims* (sentence-grained, not chunks — chunks are too coarse for pair contradiction).
 2. **Assertion pre-filter** (the biggest precision lever) — only first-person, assertive, settled sentences. Drop questions, quoted/attributed spans (`>` blockquotes, "X said", citations), hedged/hypothetical/draft sentences, and zones the user marked non-settled (`## Counterarguments`, `#draft`/`#fleeting` tags, daily-note free-writing).
-3. **NLI cull** — `Xenova/nli-deberta-v3-small` (Apache-2.0, pre-converted ONNX, via `@huggingface/transformers` v3) as a **high-threshold, recall-oriented filter** — never the arbiter (NLI's documented failure mode is exactly the negation/overlap false positive).
-4. **Judge** (the arbiter) via the **`Judge` interface** — default **tool-result-as-judge** (return candidates as `structuredContent`; the Claude session adjudicates attribution/hypothetical/temporal — zero key, works in every client), or direct-API (frontier, recommended for hard calls), or local-LLM (offline, labeled weaker).
+3. **Similarity cull** — rank related claims by **Nomic-embedding distance** (API), keep top-K above a similarity floor, capped at `JUDGE_BUDGET`. *No local NLI model* (per user 2026-05-23: API-only ML) — the Judge is the arbiter anyway; the assertion pre-filter (step 2, deterministic) does the heavy precision lifting before this.
+4. **Judge** (the arbiter) via the **`Judge` interface** — default **tool-result-as-judge** (return candidates as `structuredContent`; the Claude session adjudicates contradiction vs agreement vs update, w/ attribution/hypothetical/temporal — zero key, works in every client). Optional direct-API judge for the non-conversational standing view.
 5. **Temporal reframe** — if the conflicting note is newer, surface as *"You've changed your mind since [[A]] (Jan 14)"*, not "you contradict yourself." Most vault "contradictions" are just learning.
 6. **Confirm-and-learn** — surface as a question with exact citations + one-click *not-a-contradiction / it's-an-update / reconcile*; every dismissal is a stored label that raises the threshold for similar pairs.
 
@@ -134,13 +135,13 @@ Transport: **stdio** (no HTTP → no DNS-rebinding exposure). All tools: `output
 
 ## 9. Offline build & dependency centralization
 
-Three distinct "offline"s, handled separately (the v1 spec conflated them):
+**"Offline" = easy offline BUILD + local-first vault DATA. The ML runtime is API-based (Nomic + Voyage) — there are NO local ML models** (per user 2026-05-23). So there is no air-gapped *runtime*; the build is offline-able, the data is local, the inference is cloud.
 
-1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `pnpm install --offline` against a warm/vendored store, on a **pinned pnpm version** (dodges the 10.12.2 offline regression). CI runs `pnpm install --offline` from a cold store on a **different arch** than `fetch` ran — the only real proof. sqlite-vec is the one native dep: pre-fetch its prebuilt binary for the target platform; LanceDB rejected partly to avoid 8-platform native sprawl.
-2. **Engine runtime** — embeddings via **Nomic `nomic-embed-text` in Ollama** (a separate localhost daemon — state this plainly; or Nomic Atlas API); **rerank via Voyage `rerank-2.5`** (cloud, assumed reachable); **NLI cull via local DeBERTa ONNX in the Node engine** (never a renderer). Local-data, local-embed; cloud rerank. Optional air-gap: tar `~/.ollama/models` + vendor the DeBERTa ONNX to a cache dir (nothing GB-scale enters git/bundle) — but note rerank then needs network unless disabled.
-3. **Honest framing** — rerank is **always Voyage `rerank-2.5`** (assume reachable). Embeddings = **Nomic** (open weights, local via Ollama). Judge default = tool-result-as-judge (host Claude session, zero-key); a local-LLM judge fallback is weaker at belief discrimination (label it). "Offline/local-first" = local vault data + easy offline *build* + local embeddings, with Voyage rerank at runtime — not a guaranteed zero-network runtime.
+1. **Offline build** — pnpm `catalog:` centralizes versions; committed `pnpm-lock.yaml`; `pnpm fetch` → `rm -rf node_modules` → `pnpm install --offline --frozen-lockfile` against a warm/vendored store, on a **pinned pnpm version** (`11.0.7`, frozen). CI runs the install from a cold store on a **different arch** than `fetch` ran — the only real proof. **`sqlite-vec` + `better-sqlite3` are the only native deps** (no ONNX/transformers anymore); pre-fetch their prebuilt binaries per platform. Build is fully offline-able.
+2. **Runtime (API-based)** — embeddings via **Nomic Atlas API**, rerank via **Voyage `rerank-2.5` API**, Sentinel cull via embedding-similarity (Nomic), Judge via the host Claude session (tool-result-as-judge, zero-key). No Ollama daemon, no ONNX, no local model files. Needs network at query time.
+3. **What's local:** the vault markdown, the SQLite index (`sqlite-vec`+FTS5), the link/claim graph, all deterministic code (parser, chunker, assertion filter, RRF, git plumbing). Privacy note: note text is sent to Nomic/Voyage at index/query time — state this plainly (no on-device embedding option in this build).
 
-**Distribution:** **MCPB bundle** with vendored `node_modules` = primary + air-gappable (Node ships inside Claude Desktop/Code). `npx -y @vaultnexus/mcp` = online convenience only (not air-gappable). `claude mcp add --transport stdio -- …` for dev.
+**Distribution:** **MCPB bundle** with vendored `node_modules` = primary (Node ships inside Claude Desktop/Code; only `sqlite-vec`/`better-sqlite3` natives ride along, per-platform). `npx -y @vaultnexus/mcp` = online convenience. `claude mcp add --transport stdio -- …` for dev.
 
 **Secrets:** keys via env (`VOYAGE_API_KEY`), never committed; `.gitignore` covers the `.db`, model caches, `.env`.
 
@@ -173,8 +174,8 @@ Three distinct "offline"s, handled separately (the v1 spec conflated them):
 
 ## 13. Open questions
 
-- Embedding model: **Nomic `nomic-embed-text-v1.5`** (768-dim, 8192 ctx, Apache-2.0, Matryoshka), default via Ollama; `-v2-moe` if multilingual matters — confirm dim (768 vs Matryoshka 512) via eval on a sample vault.
-- NLI model size/quality tradeoff: `nli-deberta-v3-small` (Apache-2.0, pre-converted) default; validate ONNX runtime early (known DeBERTa-v3 export gremlins).
+- Embedding model: **Nomic Atlas API** `nomic-embed-text-v1.5` (768-dim, `task_type` prefix) — API only, no local model. Confirm dim (768 vs Matryoshka 512) + Atlas rate limits/pricing/free-tier on a sample vault.
+- Sentinel cull = embedding-similarity + Judge (no local NLI). Watch Judge volume per check (bound via `SIM_FLOOR` + `JUDGE_BUDGET`); revisit if precision/cost needs a cheap pre-cull.
 - Vault path + git-backed? (enables temporal/drift) — from config at first run.
 - sqlite-vec vault-size ceiling vs a pure-JS fallback — measure; document the crossover.
 - Headless graph parity vs `metadataCache` — measure divergence on a sample vault; document the known-unequal cases (shortest-path, case-fold, embeds).

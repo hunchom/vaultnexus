@@ -14,8 +14,9 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 | sqlite-vec | 0.1.9 | loadable ext, pure optionalDependencies (clean air-gap); brute-force only (ANN is 0.1.10-alpha) |
 | @modelcontextprotocol/sdk | ≥1.24.0 (1.29.x ok) | ≥1.24.0 only matters if HTTP (DNS-rebinding); stdio fine |
 | zod | 4.x | SDK accepts v3/v4/Standard-Schema |
-| @huggingface/transformers | v3 (3.8.x) | NOT legacy `@xenova/transformers` |
-| onnxruntime-node | (transitive of ↑) | CPU; the runtime for NLI + local reranker |
+| ~~@huggingface/transformers~~ | — | **DROPPED** (no local ML models per user 2026-05-23) |
+| ~~onnxruntime-node~~ | — | **DROPPED** (no local NLI/reranker) |
+| ~~ollama~~ | — | **DROPPED for embeddings** (Nomic Atlas API instead) |
 | unified / remark-parse / remark-gfm / remark-frontmatter | 11 / 11 / 4 / 5 | mdast pipeline |
 | gray-matter + js-yaml | 4.0.3 + 4.1.1 (inject yaml) | frontmatter |
 | sentence-splitter | 5.x | Claim-Index segmentation (preserves offsets) |
@@ -48,21 +49,19 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 ## 3. Embedding providers (`src/providers/`)
 
 - **Interface** (`core`): `embed(texts, {kind:'doc'|'query'}) → {vectors, usageTokens?}` + **sync `descriptor{providerId, modelId, dims, dtype, spaceId, normalized}`**. `kind` mandatory. Provider owns batching.
-- **DEFAULT = Nomic `nomic-embed-text-v1.5`** (per user 2026-05-23). **768-dim** native, Matryoshka → 512/256, 8192 ctx, Apache-2.0, open weights. ⚠️ **task-prefix required** — map `kind:'doc'`→`"search_document: "`, `kind:'query'`→`"search_query: "` (prepend to each text; the asymmetry analog of Voyage's `input_type`). Normalized → `normalized=true`. (Multilingual? → `nomic-embed-text-v2-moe`.)
-  - **Default runner: Ollama** — `ollama pull nomic-embed-text`, `POST /api/embed` (**never** deprecated `/api/embeddings`); separate daemon → `healthCheck()` (`/api/version`+`/api/tags`), warm `keep_alive:"30m"`, fail-fast if absent. Local, free, open.
-  - **Cloud alt: Nomic Atlas API** — `POST https://api-atlas.nomic.ai/v1/embedding/text`, model `nomic-embed-text-v1.5`, `task_type` ∈ {search_document, search_query}, `$NOMIC_API_KEY`.
-- **Optional providers (pluggable, not default):** Voyage `/v1/embeddings` (`voyage-4-large`/`voyage-4`, `input_type` asymmetry, int8) and OpenAI `text-embedding-3-large` (`dimensions`). Kept behind the interface for users who want them.
-- **dims = 768** (was 1024 for Voyage). vec0 column = `float[768]` (→ `int8[768]` at scale). **Update env**: `GITNEXUS_EMBEDDING_MODEL=nomic-embed-text`, `DIMS=768`, URL = Ollama (`http://127.0.0.1:11434`) or Nomic Atlas.
+- **Embeddings = Nomic Atlas API, API-ONLY** (per user 2026-05-23: no non-API embedding LLM, no Ollama, no local model). `POST https://api-atlas.nomic.ai/v1/embedding/text`, model `nomic-embed-text-v1.5`, **768-dim**, `task_type` ∈ {`search_document`, `search_query`} ← map from `kind:'doc'|'query'` (the asymmetry analog), `$NOMIC_API_KEY`. Client: `@nomic-ai/atlas` (verify LICENSE) or raw `fetch`. Normalized → `normalized=true`.
+- **Optional alt providers (pluggable, behind the interface):** Voyage `/v1/embeddings`, OpenAI `text-embedding-3-large` — also API. (No local/Ollama provider in this build.)
+- **dims = 768** (was 1024 for Voyage). vec0 column = `float[768]` (→ `int8[768]` at scale). **Env**: `GITNEXUS_EMBEDDING_MODEL=nomic-embed-text-v1.5`, `DIMS=768`, `URL=https://api-atlas.nomic.ai`, `NOMIC_API_KEY=…`.
 - **Model-switch guard:** compare **`spaceId`** (e.g. `nomic-v1.5:768:float32`); real change → confirmed full re-embed (atomic db swap). Content-hash cache keyed by model.
-- **Cost:** Nomic via Ollama = **$0** (local, open). Nomic Atlas has a free tier. Voyage rerank only → 200M free covers it. Incremental hash-cache → ~$0 after cold index. Cold-index cost = time (local embed, tens of min on a big vault), not $.
+- **Cost:** Nomic Atlas has a free tier; check rate limits + per-1M pricing before a big cold index. Voyage rerank → 200M free. Incremental hash-cache → ~$0 after cold index. **Privacy: note text is sent to Nomic + Voyage** at index/query time — no on-device option in this build; state plainly in the README.
 
-## 4. Rerank + NLI + assertion filter (`src/providers/`, `core/sentinel/`)
+## 4. Rerank + contradiction cull + assertion filter (`src/providers/`, `core/sentinel/`)
 
 - **Reranker interface:** `rerank(query, candidates, {topK, instruction?}) → [{id,index,score}]`. Pool ~20–30 → 5–8.
-- **Reranker = Voyage `rerank-2.5`, ALWAYS** (incl. "offline"/local-first mode — assume the Voyage API is reachable at runtime). `POST /v1/rerank`; **instruction prepended to the `query` string** (no separate field); `top_k`; $0.05/M, 200M free. **No local cross-encoder** (per user 2026-05-23) → drops the 279–571 MB ONNX reranker, the `ConvInteger` risk, and the "hybrid-only degraded mode." `noop` impl kept ONLY as a true-no-network last resort + the `−rerank` eval-ablation config; it is not the offline default.
-- **NLI cull:** `Xenova/nli-deberta-v3-small` **q8 = 172 MB, Apache-2.0**. **Labels `0=contradiction, 1=entailment, 2=neutral`** (verbatim). Threshold `p(contra) ≥ ~0.5` (per-vault calibrated), **max of both directions, never argmax**; entailment cap kills paraphrase. **Consume the pre-converted Xenova artifact, pinned SHA** → sidesteps the DeBERTa Expand-node + SentencePiece byte-fallback gremlins.
-- **Assertion pre-filter (biggest FP lever): rules-first, deterministic** (zone drops from chunk metadata + ConText/hedge lexicon). KEEP: first-person + assertive + settled. DROP: questions, quoted/attributed, hedged/modal, hypothetical/conditional, future-intent, imperative, fragments, non-settled zones (`## Counterarguments`, `#draft`/`#fleeting`, daily notes). SetFit tiny-classifier only as P1.5 fallback; never let it *admit* what a rule rejected.
-- **Air-gap:** `env.allowRemoteModels=false`, `env.localModelPath`/`cacheDir` to vendored dir, **pinned commit SHAs**, single-file q8 artifacts.
+- **Reranker = Voyage `rerank-2.5` API, ALWAYS.** `POST /v1/rerank`; **instruction prepended to the `query` string** (no separate field); `top_k`; $0.05/M, 200M free. No local cross-encoder.
+- **Contradiction cull = embedding-similarity** (Nomic API), NOT a local NLI model (per user 2026-05-23). Rank related claims by cosine distance, keep top-K above `SIM_FLOOR`, cap at `JUDGE_BUDGET` → hand to the Judge. **Dropped:** `Xenova/nli-deberta-v3-small`, `@huggingface/transformers`, `onnxruntime`, the DeBERTa ONNX gremlins, and all NLI thresholds (`NLI_CONTRA_HI`/`NLI_ENTAIL_CAP`). The Judge (host Claude session) is the arbiter; precision rests on the assertion filter + Judge.
+- **Assertion pre-filter (biggest FP lever): rules-first, deterministic, ZERO models** (regex + lexicon + chunk-metadata zone drops). KEEP: first-person + assertive + settled. DROP: questions, quoted/attributed, hedged/modal, hypothetical/conditional, future-intent, imperative, fragments, non-settled zones (`## Counterarguments`, `#draft`/`#fleeting`, daily notes). (SetFit dropped — it's a local model.)
+- **No model vendoring / air-gap weights** — there are no local ML models in this build.
 
 ## 5. MCP server (`src/server/`)
 
@@ -76,24 +75,24 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 
 ## 6. Sentinel + Epistemic Integrity (`core/sentinel/`)
 
-- **Cascade = recall-funnel → precision-gate:** claim-grained ANN → candidate bound (topic gate + temporal cone + `SIM_FLOOR`) → NLI cull (high-recall) → **Judge (arbiter)** → temporal reframe → label gate → emit. NLI low-precision/high-recall; LLM-judge ~0.9 precision → NLI early, Judge last.
+- **Cascade = recall-funnel → precision-gate:** claim-grained ANN (Nomic embeddings) → candidate bound (topic gate + temporal cone + `SIM_FLOOR`) → assertion pre-filter → **Judge (arbiter)** → temporal reframe → label gate → emit. No local NLI stage (dropped per user); the deterministic assertion filter + the LLM Judge (~0.9 precision) carry precision. Bound Judge volume with `SIM_FLOOR` + `JUDGE_BUDGET`.
 - **`ClaimRecord`:** raw+canonical text, polarity, topic_key, `asserted_at`(git/frontmatter/mtime) vs `observed_at`, source_zone, `state`(active/superseded/retracted)+`superseded_by`, `content_hash`+`filter_version`. Soft-delete retracted (drift history).
 - **Judge = tool-result-as-judge (default, zero-key, every client):** `sentinel_check` returns candidates as `structuredContent` + a `VERDICT_RUBRIC` ({CONTRADICTION, UPDATE, NOT_CONTRADICTION, PARAPHRASE}) → live Claude session adjudicates → `resolve_sentinel{id,verdict}` writes the label. Direct-API/local-LLM judge for the non-conversational standing view.
-- **Params (per-vault calibratable):** `K_ANN=50, SIM_FLOOR=0.55, NLI_CONTRA_HI=0.85, NLI_ENTAIL_CAP=0.15, JUDGE_BUDGET=8, JUDGE_EMIT_MIN=0.70` (precision dial), `EMIT_CAP=5`.
+- **Params (per-vault calibratable):** `K_ANN=50, SIM_FLOOR=0.55, JUDGE_BUDGET=8, JUDGE_EMIT_MIN=0.70` (precision dial), `EMIT_CAP=5`. (NLI thresholds removed — no NLI stage.)
 - **Scale:** incremental (only changed claims) + ANN + topic gate + Judge-budget → **per-edit cost constant in vault size**.
-- **Confirm-and-learn (3-tier suppression):** exact-pair (hard, permanent, `pair_fingerprint` survives edits) → embedding-neighborhood (threshold-lift, `SUPPRESS_RADIUS=0.90`) → per-topic (lift after N≥3, decays). Checked **before** NLI/Judge compute → dismissed pairs cost ~0.
-- **Belief-drift (`recall_history`):** `git log -G<topic> --all` → `git show <sha>:<path>` re-derive claims → **arc compression** (narrate only stance-change points, NLI/embedding-distance) → Judge narrates. Needs git-backed vault (else mtime/frontmatter fallback).
+- **Confirm-and-learn (3-tier suppression):** exact-pair (hard, permanent, `pair_fingerprint` survives edits) → embedding-neighborhood (threshold-lift, `SUPPRESS_RADIUS=0.90`) → per-topic (lift after N≥3, decays). Checked **before** Judge compute → dismissed pairs cost ~0.
+- **Belief-drift (`recall_history`):** `git log -G<topic> --all` → `git show <sha>:<path>` re-derive claims → **arc compression** (narrate only stance-change points via embedding-distance) → Judge narrates. Needs git-backed vault (else mtime/frontmatter fallback).
 - **Epistemic Integrity view (P2 batch):** contradiction graph → connected-components + **Louvain** clusters (edge weight=Judge confidence, reuse cached verdicts); least-stable (git revision count); stale (¬reaffirmed ∧ old ∧ contradicted-by-newer); drift-vs-convergence (stance-embedding variance over time).
-- **Precision tactics ranked:** zone+assertion filter (#1) > Judge-arbiter (#2) > temporal reframe (#3) > confirm-learn (#4) > NLI prob/bidirectional/entailment-cap (#5) … + failure-mode→mitigation table (sentinel agent report).
+- **Precision tactics ranked:** zone+assertion filter (#1) > Judge-arbiter (#2) > temporal reframe (#3) > confirm-learn (#4) > `SIM_FLOOR`/similarity cull (#5) … + failure-mode→mitigation table (sentinel agent report).
 
 ## 7. Eval harness (`core/eval/`, `src/eval/`)
 
 - **Golden Q→note:** LLM reads a chunk → generates a question it answers; source chunk = gold. Anti-leakage prompt rules ("no verbatim phrases / no deixis"), answerability + retrievability gates, dedup (exact/semantic/per-note-cap). **25 bootstrap → 100 proof** (tight CIs). JSON keyed by vault-hash; record generator model + prompt SHA.
 - **IR metrics:** Recall@k, MRR, **NDCG@10** (`2^rel−1` gain) — **validate against `pytrec_eval`** so numbers are Voyage/BEIR-comparable. `Fail@20 = 1−Recall@20` = Anthropic analog.
 - **A/B switchboard:** `dense → +bm25 → +expand → +rerank → +claim` via a `RetrievalConfig` toggle (same index reused) → failure-rate ladder + **bootstrap CI + paired permutation test** (claim a win only at p<0.05).
-- **Sentinel FP (PRIMARY metric):** "messy notes" negative set across 8 categories (quoted/question/hypothetical/hedged/paraphrase/negation-overlap/temporal-update/different-subject), built by **mining the vault at low NLI threshold + hand-label**; positive set by mining + controlled synthetic injection. **Per-vault calibration loop:** sweep NLI τ × assertion-mode → pick highest recall s.t. FP ≤ target (default 5%). This is the demo gate.
-- **RAGAS** (faithfulness/answer-rel/context-precision/context-recall): lightweight TS reimpl on existing Judge+Embedding, cross-checked ±0.05 vs Python `ragas` once.
-- **Head-to-head:** headless reimpl of Smart Connections (bge-micro-v2 cosine, no graph/rerank) on the identical golden set; report `dense`-only (embedding gap) + `+rerank` (full-stack gap) w/ significance. Sentinel stands alone (no competitor).
+- **Sentinel FP (PRIMARY metric):** "messy notes" negative set across 8 categories (quoted/question/hypothetical/hedged/paraphrase/negation-overlap/temporal-update/different-subject), built by **mining the vault at low similarity threshold + hand-label**; positive set by mining + controlled synthetic injection. **Per-vault calibration loop:** sweep `SIM_FLOOR` × assertion-mode × `JUDGE_EMIT_MIN` → pick highest recall s.t. FP ≤ target (default 5%). This is the demo gate.
+- **RAGAS** (faithfulness/answer-rel/context-precision/context-recall): lightweight TS reimpl on existing Judge+Embedding (copy autoevals MIT prompts), cross-checked ±0.05 vs Python `ragas` once (dev-only).
+- **Head-to-head: CUT** (per user — bge-micro-v2 is a local model). Eval proves quality via our own metrics: NDCG@10 vs Voyage's published numbers + the A/B ladder + Sentinel FP. No competitor reimpl.
 - **Reproducibility:** per-run manifest records **active graph source** (parser vs canonical — design §11 requirement) + every model-id + golden hash + seed. **CI smoke-eval** on a committed 12-note fixture vault + deterministic stub embedder, asserts hard thresholds.
 
 ## 8. Packaging / offline / distribution
@@ -102,18 +101,18 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 - **Air-gap install:** `pnpm fetch` → **`rm -rf node_modules`** → `pnpm install --offline --frozen-lockfile` (the universal workaround). `supportedArchitectures` to fetch all platform binaries. Always `--frozen-lockfile` (avoids `ERR_PNPM_NO_OFFLINE_TARBALL` #10715).
 - **Two native deps:** `sqlite-vec` (ABI-agnostic loadable ext, 5 platform optionalDeps, clean) + **`better-sqlite3`** (⚠️ ABI-bound `.node` — the real risk; build against **Node 22** ABI 127 = Claude Desktop; #180). 
 - **CI gate (the only real proof):** x64 `fetch` → **arm64** `install --offline` from cold store + `/etc/hosts` registry blackhole + native-load smoke test.
-- **MCPB (primary, air-gap):** manifest v0.3; `user_config` (vault_path/voyage_api_key `sensitive`/ollama_host/offline_mode → env); **flat `npm install --production` tree** (not pnpm symlinks); build better-sqlite3 against Node 22; **one `.mcpb` per platform**; **ONNX weights stay OUT** (separate cache, ~40–90 MB bundle). `npx` = online convenience only.
-- **Model distribution (air-gap):** Ollama = tar `~/.ollama/models` (**blobs + manifests both**, `OLLAMA_MODELS`). ONNX = vendor `cacheDir` + `allowRemoteModels=false` + pinned SHA.
-- **Repo:** `.gitignore` (`*.db*`, `server/models/`, `*.onnx`, `.env`, `*.mcpb`), MIT LICENSE (deps compatible), README (quickstart + air-gap section), `.nvmrc=22`, `engine-strict`. **No AI/Claude attribution anywhere.**
+- **MCPB (primary):** manifest v0.3; `user_config` (vault_path, `nomic_api_key` `sensitive`, `voyage_api_key` `sensitive` → env); **flat `npm install --production` tree** (not pnpm symlinks); build better-sqlite3 against Node 22; **one `.mcpb` per platform**. Lean bundle (no model weights — none exist). `npx` = online convenience.
+- **No model distribution** — there are no local ML models to ship (embeddings + rerank are API; cull is embedding-similarity; Judge is the host session).
+- **Repo:** `.gitignore` (`*.db*`, `.env`, `*.mcpb`), MIT LICENSE (deps compatible), README (quickstart + privacy note: text → Nomic/Voyage), `.nvmrc=22`, `engine-strict`. **No AI/Claude attribution anywhere.**
 - **Build: tsup** ESM-only, `target node22`, entries `cli` + `server`, native deps `external`, shebang on `cli.ts` only.
 
 ## 9. P0 risk-retirement spikes (do these FIRST, ~an afternoon each)
 
-1. **DeBERTa-v3 NLI ONNX** runs end-to-end in `onnxruntime-node` across **2 seq-lengths** (16 & 200 tok) — confirms the Expand-node bug is absent in the pre-converted artifact. (Highest-risk item for the whole Sentinel.)
-2. ~~bge-reranker q8 ONNX~~ — **dropped**: rerank is Voyage `rerank-2.5` always, no local reranker spike needed.
+1. ~~DeBERTa NLI ONNX~~ / ~~bge-reranker ONNX~~ — **both dropped** (no local ML models). No ONNX spikes.
+2. **sqlite-vec brute-force latency at scale** — the one real CPU cost now: benchmark a hybrid query at 50k/100k/250k chunks @768-dim in the standalone server process; confirm it stays interactive and set the int8/warn thresholds.
 3. **better-sqlite3 + sqlite-vec** load + `vec_version()` + a hybrid query on the **target platform/Node 22**; confirm the `.mcpb` ABI path (#180).
-4. **pnpm air-gap** cross-arch cold-store install (the CI gate) green before depending on the offline story.
-5. **Nomic embeddings** round-trip via Ollama (`nomic-embed-text`, `/api/embed`) — confirm the `search_document:`/`search_query:` task-prefix asymmetry + 768-dim output; also smoke the Voyage `rerank-2.5` call.
+4. **pnpm air-gap** cross-arch cold-store install (the CI gate) green before depending on the offline-build story.
+5. **Nomic Atlas API** embeddings round-trip — confirm `task_type` (`search_document`/`search_query`) + 768-dim + rate limits; smoke the Voyage `rerank-2.5` call.
 
 ## 10. Version landmines (watch list)
 
@@ -121,7 +120,6 @@ Distilled from 8 parallel implementation-research agents (2026-05-23). Companion
 - `better-sqlite3` `NODE_MODULE_VERSION` mismatch if bundle Node ≠ host Node (#1367/#1384, MCPB #180).
 - chokidar v4 dropped globs + rename events → watch dir, filter `.md` in code, treat rename as unlink+add (hash-cache makes it cheap).
 - sqlite-vec brute-force only until 0.1.10 ANN ships stable — don't depend on ANN for v1.
-- `@xenova/transformers` is legacy → use `@huggingface/transformers` v3.
 - MCP `sampling`/`elicitation` minority-supported → tool-result-as-judge + 2-call-confirm sidestep both.
 
 ## 11. Assembly plan (reuse map — glue, don't write)
@@ -136,9 +134,8 @@ Goal: maximize reuse of permissive OSS. **License posture: only MIT / Apache-2.0
 | Wikilink **tokenizer** (resolution stays ours) | `micromark-extension-wiki-link`+`mdast-util-wiki-link` (stale → pin SHA or vendor ~200 LOC) | MIT (npm) |
 | Sentence segmentation (offset-preserving via `splitAST`) | `sentence-splitter` | MIT |
 | Token budget proxy | `gpt-tokenizer` (`o200k_base`) | MIT |
-| Embeddings | `ollama` (ollama-js) [+ raw-fetch Nomic Atlas fallback] | MIT |
+| Embeddings | `@nomic-ai/atlas` (verify LICENSE) or raw `fetch` to Atlas API | TBD/—  |
 | Rerank | `voyageai` (official SDK; instruction-prepend-to-query confirmed) | MIT |
-| NLI runtime | `@huggingface/transformers` v3 | Apache |
 | Git (belief-drift) | `simple-git` (`.raw(['log','-G…','--all'])` pickaxe + `.show()`) | MIT |
 | MCPB packer (devDep) | `@anthropic-ai/mcpb` | MIT |
 | Stats primitives | `simple-statistics` | ISC |
@@ -148,7 +145,7 @@ Goal: maximize reuse of permissive OSS. **License posture: only MIT / Apache-2.0
 
 ### Vendor (pinned, kept out of git)
 - **`cyanheads/obsidian-mcp-server` (Apache-2.0)** → `section-extractor.ts` + `frontmatter-ops.ts` (pure in-memory; swap one `notFound` import) + keep NOTICE. The surgical heading/block/frontmatter edit brain = taken.
-- **`Xenova/nli-deberta-v3-small` q8 ONNX (Apache-2.0)** → pinned SHA, air-gap cacheDir.
+- *(DeBERTa ONNX vendoring removed — no local models.)*
 
 ### Copy-pattern (lift code/SQL/prompts into repo; permissive)
 - 🏆 **Quartz `ofm.ts` (MIT)** → Obsidian-flavored-markdown handler (block-refs `^id`, callouts, embeds, tags). Biggest parsing lift.
@@ -165,13 +162,10 @@ Goal: maximize reuse of permissive OSS. **License posture: only MIT / Apache-2.0
 - **`pytrec_eval` (MIT)** = the BEIR oracle → assert our TS NDCG@10/Recall@k/MRR match within 1e-6 (matching it = BEIR-comparable by construction). `ir_measures` (Apache) = friendlier-CLI alt.
 - **`ragas` (Apache, Python)** → one-time ±0.05 cross-check of faithfulness/context-precision/recall.
 
-### Port the method (no code reuse — license-blocked source)
-- **Smart Connections head-to-head** → replicate `TaylorAI/bge-micro-v2` (MIT model) + mean-pool + cosine, no graph/rerank, on our existing transformers runtime (~50 lines). SC source is `NOASSERTION`/no-compete → never vendor/fork.
-
 ### STUDY-ONLY (AGPL / no-compete / Python — ideas, not code)
 `basic-memory` (AGPL — Entity/Observation/Relation markdown grammar idea only), `khoj`/`Reor` (AGPL), `smart-connections` (no-compete), Graphiti/mem0/cognee/Letta (Apache but Python + LLM-graph shape we rejected), `remark-obsidian` (GPL — banned dep).
 
 ### Build fresh = the moat (no OSS exists; this IS the product)
 Sentinel orchestration cascade · assertion pre-filter policy · confirm-and-learn 3-tier suppression + per-vault τ-calibration · Claim Index (deterministic, content-hash-invalidated) · Epistemic Integrity construction · `Judge` interface + tool-result-as-judge · offset-faithful chunker (never split code/tables/callouts) · wikilink **resolution** · the eval harness shell (FP-primary, A/B ladder, bootstrap CI + paired permutation test ~40 lines — no JS lib does these).
 
-**Net:** plumbing + parsing front-end + edit brain + packaging + metric-validation are ~80–90% **assembled from MIT/Apache/ISC/BSD**. Bespoke = exactly the spec's stated moat (retrieval intelligence + Sentinel), nothing more. Open license checks before depending: `@nomic-ai/atlas` LICENSE (use raw-fetch if awkward; Ollama is the default anyway).
+**Net:** plumbing + parsing front-end + edit brain + packaging + metric-validation are ~80–90% **assembled from MIT/Apache/ISC/BSD**. Bespoke = exactly the spec's stated moat (retrieval intelligence + Sentinel), nothing more. Open license check: `@nomic-ai/atlas` LICENSE (use raw `fetch` to the Atlas API if awkward — it's just a POST).
