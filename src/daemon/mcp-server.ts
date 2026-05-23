@@ -32,11 +32,16 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     server.registerTool(
       'vaultnexus_bridges',
       {
-        description: 'Surface chunk pairs that are semantically similar but in different notes (hidden connections). Suggestions, not assertions.',
-        inputSchema: { topN: z.number().int().positive().optional(), minSimilarity: z.number().optional() },
+        description:
+          'Surface chunk pairs semantically similar but in different notes (hidden connections). Each pair carries crossCommunity (different link-clusters) + linked (already wikilinked); crossCommunityOnly=true returns only cross-cluster, never-linked agreements. Suggestions, not assertions.',
+        inputSchema: {
+          topN: z.number().int().positive().optional(),
+          minSimilarity: z.number().optional(),
+          crossCommunityOnly: z.boolean().optional(),
+        },
       },
-      async ({ topN, minSimilarity }) => {
-        const bridges = index.bridges(topN ?? 20, minSimilarity ?? 0.5);
+      async ({ topN, minSimilarity, crossCommunityOnly }) => {
+        const bridges = index.bridges(topN ?? 20, minSimilarity ?? 0.5, crossCommunityOnly ?? false);
         return { content: [{ type: 'text', text: JSON.stringify(bridges) }] };
       },
     );
