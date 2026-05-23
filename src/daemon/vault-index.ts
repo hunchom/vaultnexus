@@ -1,6 +1,6 @@
 import type { Embedder } from '../core/embedder.js';
 import { chunkDocument } from '../core/chunk.js';
-import { l2normalize } from '../core/vectors.js';
+import { l2normalize, dotF32 } from '../core/vectors.js';
 import { calibrateScale, quantize } from '../core/quantize.js';
 import { search } from '../core/search.js';
 
@@ -15,6 +15,8 @@ export interface IndexedChunk {
 export interface SearchHit extends IndexedChunk {
   score: number;
 }
+
+export interface Bridge { a: IndexedChunk; b: IndexedChunk; similarity: number; }
 
 /** In-memory semantic index over note block-chunks. Cosine via unit-norm vectors. */
 export class VaultIndex {
@@ -62,6 +64,26 @@ export class VaultIndex {
     });
     this.flatInt8 = i8;
     this.flatF32 = f;
+  }
+
+  /** Cross-note high-similarity chunk pairs ("notes that secretly agree"), top-N descending. FP-safe. */
+  bridges(topN = 20, minSimilarity = 0.5): Bridge[] {
+    const n = this.chunks.length;
+    if (n < 2) return [];
+    if (!this.flatInt8) this.build();
+    const f = this.flatF32!;
+    const d = this.dims;
+    const out: Bridge[] = [];
+    for (let i = 0; i < n; i++) {
+      const vi = f.subarray(i * d, (i + 1) * d);
+      for (let j = i + 1; j < n; j++) {
+        if (this.chunks[i].notePath === this.chunks[j].notePath) continue;
+        const s = dotF32(vi, f.subarray(j * d, (j + 1) * d));
+        if (s >= minSimilarity) out.push({ a: this.chunks[i], b: this.chunks[j], similarity: s });
+      }
+    }
+    out.sort((x, y) => y.similarity - x.similarity);
+    return out.slice(0, topN);
   }
 
   /** Embed query, search, return cited hits. */
