@@ -118,6 +118,33 @@ describe('git-history edge cases', () => {
     } finally { fx.cleanup(); }
   });
 
+  it('returns [] when repo has commits but the file is not tracked', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vn-edge-absent-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main', repo]);
+      writeFileSync(join(repo, 'other.md'), 'hello\n');
+      execFileSync('git', ['-C', repo, 'add', '.']);
+      execFileSync(
+        'git',
+        ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'init'],
+      );
+      const revs = await noteRevisions(repo, 'absent.md');
+      expect(revs).toEqual([]);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it('noteRevisions: until filter excludes later commits', async () => {
+    const fx = seedRepo();
+    try {
+      // until=2024-02-15 → c1 (2024-01-01) + c2 (2024-02-01) pass; c3 (2024-03-01) excluded
+      const revs = await noteRevisions(fx.repo, 'notes/a.md', { until: '2024-02-15' });
+      expect(revs.length).toBe(2);
+      for (const r of revs) {
+        expect(Date.parse(r.commitDate)).toBeLessThan(Date.parse('2024-02-15'));
+      }
+    } finally { fx.cleanup(); }
+  });
+
   it('withContent on renamed file returns partial content (pre-rename revisions content undefined, no crash)', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'vn-edge-rename-content-'));
     try {

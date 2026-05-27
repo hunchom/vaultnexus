@@ -43,8 +43,9 @@ export async function noteRevisions(
   opts: HistoryOptions = {},
 ): Promise<Revision[]> {
   if (!(await isGitRepo(repoPath))) return [];
+  const cap = opts.maxRevisions ?? 50;
   const args = [
-    '-C', repoPath, 'log', '--follow',
+    '-C', repoPath, 'log', '--follow', '-n', String(cap),
     `--pretty=format:%H${SEP}%aI${SEP}%s${SEP}%aE`,
   ];
   if (opts.since) args.push(`--since=${opts.since}`);
@@ -62,7 +63,8 @@ export async function noteRevisions(
     const [sha, commitDate, message, authorEmail] = line.split(NUL);
     return { sha, commitDate, message, authorEmail };
   });
-  const sliced = all.slice(0, opts.maxRevisions ?? 50);
+  // defensive client-side slice; server -n already enforces the cap
+  const sliced = all.slice(0, cap);
   if (!opts.withContent) return sliced;
   // parallel git-show per revision → annotate content + frontmatterDate; pre-rename SHAs may miss notePath → undefined
   const contents = await Promise.all(sliced.map((r) => noteContentAt(repoPath, r.sha, notePath)));
