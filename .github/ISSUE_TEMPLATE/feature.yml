@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a new capability or behavior change.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you want?
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: Concrete use case. What does your current workflow look like, and what's painful about it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How are you working around this today?

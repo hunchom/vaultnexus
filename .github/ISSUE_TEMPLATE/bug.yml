@@ -1,0 +1,42 @@
+name: Bug report
+description: Something is broken or misbehaving.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Short, factual description. Include what you expected vs. what you got.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `VAULTNEXUS_VAULT=... node dist/daemon/main.js`
+        2. `curl -X POST ...`
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: |
+        - OS:           macOS 14 / Linux ...
+        - Node version: 22.x
+        - Embedder:     voyage-3-large / fake / ...
+        - VaultNexus:   v0.1.0 (or commit sha)
+        - Obsidian:     1.5.x (if relevant)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon log
+      description: Output from `node dist/daemon/main.js` around the failure. Trim secrets.
+      render: shell
