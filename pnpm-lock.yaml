@@ -48,8 +48,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0
       numkong:
-        specifier: ^7.6.0
-        version: 7.6.0
+        specifier: ^7.7.0
+        version: 7.7.0
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
@@ -440,38 +440,38 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
-  '@numkong/darwin-arm64@7.6.0':
-    resolution: {integrity: sha512-x191qWUx+Dhoqt3s5QCXAar4xzwjrP9giEEoc4FTKQ4ajqoHxy1x/zGIiTC0dByX/qoqqx3fE4Felfqu3UQonw==}
+  '@numkong/darwin-arm64@7.7.0':
+    resolution: {integrity: sha512-2eL+AQupN27n1lpfW9NNAhnl3XQ5lQugD/7NY/UA97f/TJkJwODEwKlxAM/LEH7RH2Ten+d7t/abnbo1QZ/MZw==}
     engines: {node: '>=22.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  '@numkong/darwin-x64@7.6.0':
-    resolution: {integrity: sha512-xqOIdcF4ld4uw1IYpLPFMkEkl9wQh8TyxuNzybRw//V0ysGGFKmw0soR+WPmC0o/ggGTLT5902ZecuazSId5bA==}
+  '@numkong/darwin-x64@7.7.0':
+    resolution: {integrity: sha512-VhYvy8iRjcIEjbiVYhAguOg/tEskjgp5tsLjwGirBDxitVUv2HOX9izL948YbMdXhxCeyNzh2CsQgaP4xQ4/gQ==}
     engines: {node: '>=22.0.0'}
     cpu: [x64]
     os: [darwin]
 
-  '@numkong/linux-arm64@7.6.0':
-    resolution: {integrity: sha512-/NrAEOekzk7QWktD7Gsm0qyzhzA59z8nlG+BOvHZl6b/DB0f76dgGZiVSEtAdvqOB9gDbeYnKXknlH2ouKenwQ==}
+  '@numkong/linux-arm64@7.7.0':
+    resolution: {integrity: sha512-ZATvBpvQz5Id4qaKCwM6ccKetm3PO2MCEDMK6wrZehDxKskn0XmuOJhN5D845EbIhdO0weN4l2hmH10D3/L7WQ==}
     engines: {node: '>=22.0.0'}
     cpu: [arm64]
     os: [linux]
 
-  '@numkong/linux-x64@7.6.0':
-    resolution: {integrity: sha512-846mO4XGqNc/Qrcj0KrSZv3Xr7+q8RThnQwQudWXpurV6AKPlel+MOUadsCOJ0XFAQVGJZvgbjhuz2dvsfVqDw==}
+  '@numkong/linux-x64@7.7.0':
+    resolution: {integrity: sha512-1rrMIiEAUhth/1klXDYl+2Yipih7olg5zJukpkbOXNxxURfx0vN1ML9KGuHJgQhMYn05hHmMKOWRhF5JT/6gKA==}
     engines: {node: '>=22.0.0'}
     cpu: [x64]
     os: [linux]
 
-  '@numkong/win32-arm64@7.6.0':
-    resolution: {integrity: sha512-3OBTuI8zXF6r8532zydnr+xtF2WiTUOExK0TGYGbRzontANdWP5YTkPZ5y2HpMHNcCo/ep/8/b6gWtkR3U/Tuw==}
+  '@numkong/win32-arm64@7.7.0':
+    resolution: {integrity: sha512-0fdpoGGHCvPMaDI4NtOq43DjqH1WFdS+ZcsaEiloAXnv3qAhFs5ga4Df0ZC/VCM/Y0Sbsr7ZA8R2ZWJsjS2a8w==}
     engines: {node: '>=22.0.0'}
     cpu: [arm64]
     os: [win32]
 
-  '@numkong/win32-x64@7.6.0':
-    resolution: {integrity: sha512-8lXEt+SRTHpDXWZg6XhW1yXyaGiaIq29RPv/ncFZBP04RqT+HvJJrQSDyBJwFaujL79qPI6QYzdrATyJSqw+Cw==}
+  '@numkong/win32-x64@7.7.0':
+    resolution: {integrity: sha512-cB2DgkQ6bU/3JH/ADK+zqyzQ84KRBj8e+z5l4JeH6KBKMFyopQv73q4aJ5D5YXI1L1iphBcSP+FTw6sx/tVcmw==}
     engines: {node: '>=22.0.0'}
     cpu: [x64]
     os: [win32]
@@ -514,79 +514,66 @@ packages:
     resolution: {integrity: sha512-EIPRXTVQpHyF8WOo219AD2yEltPehLTcTMz2fn6JsatLYSzQf00hj3rulF+yauOlF9/FtM2WpkT/hJh/KJFGhA==}
     cpu: [arm]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm-musleabihf@4.60.4':
     resolution: {integrity: sha512-J3Yh9PzzF1Ovah2At+lHiGQdsYgArxBbXv/zHfSyaiFQEqvNv7DcW98pCrmdjCZBrqBiKrKKe2V+aaSGWuBe/w==}
     cpu: [arm]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-arm64-gnu@4.60.4':
     resolution: {integrity: sha512-BFDEZMYfUvLn37ONE1yMBojPxnMlTFsdyNoqncT0qFq1mAfllL+ATMMJd8TeuVMiX84s1KbcxcZbXInmcO2mRg==}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-arm64-musl@4.60.4':
     resolution: {integrity: sha512-pc9EYOSlOgdQ2uPl1o9PF6/kLSgaUosia7gOuS8mB69IxJvlclko1MECXysjs5ryez1/5zjYqx3+xYU0TU6R1A==}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-loong64-gnu@4.60.4':
     resolution: {integrity: sha512-NxnomyxYerDh5n4iLrNa+sH+Z+U4BMEE46V2PgQ/hoB909i8gV1M5wPojWg9fk1jWpO3IQnOs20K4wyZuFLEFQ==}
     cpu: [loong64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-loong64-musl@4.60.4':
     resolution: {integrity: sha512-nbJnQ8a3z1mtmrwImCYhc6BGpThAyYVRQxw9uKSKG4wR6aAYno9sVjJ0zaZcW9BPJX1GbrDPf+SvdWjgTuDmnw==}
     cpu: [loong64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-ppc64-gnu@4.60.4':
     resolution: {integrity: sha512-2EU6acNrQLd8tYvo/LXW535wupT3m6fo7HKo6lr7ktQoItxTyOL1ZCR/GfGCuXl2vR+zmfI6eRXkSemafv+iVg==}
     cpu: [ppc64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-ppc64-musl@4.60.4':
     resolution: {integrity: sha512-WeBtoMuaMxiiIrO2IYP3xs6GMWkJP2C0EoT8beTLkUPmzV1i/UcOSVw1d5r9KBODtHKilG5yFxsGRnBbK3wJ4A==}
     cpu: [ppc64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-riscv64-gnu@4.60.4':
     resolution: {integrity: sha512-FJHFfqpKUI3A10WrWKiFbBZ7yVbGT4q4B5o1qKFFojqpaYoh9LrQgqWCmmcxQzVSXYtyB5bzkXrYzlHTs21MYA==}
     cpu: [riscv64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-riscv64-musl@4.60.4':
     resolution: {integrity: sha512-mcEl6CUT5IAUmQf1m9FYSmVqCJlpQ8r8eyftFUHG8i9OhY7BkBXSUdnLH5DOf0wCOjcP9v/QO93zpmF1SptCCw==}
     cpu: [riscv64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-linux-s390x-gnu@4.60.4':
     resolution: {integrity: sha512-ynt3JxVd2w2buzoKDWIyiV1pJW93xlQic1THVLXilz429oijRpSHivZAgp65KBu+cMcgf1eVVjdnTLvPxgCuoQ==}
     cpu: [s390x]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-gnu@4.60.4':
     resolution: {integrity: sha512-Boiz5+MsaROEWDf+GGEwF8VMHGhlUoQMtIPjOgA5fv4osupqTVnJteQNKJwUcnUog2G55jYXH7KZFFiJe0TEzQ==}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@rollup/rollup-linux-x64-musl@4.60.4':
     resolution: {integrity: sha512-+qfSY27qIrFfI/Hom04KYFw3GKZSGU4lXus51wsb5EuySfFlWRwjkKWoE9emgRw/ukoT4Udsj4W/+xxG8VbPKg==}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@rollup/rollup-openbsd-x64@4.60.4':
     resolution: {integrity: sha512-VpTfOPHgVXEBeeR8hZ2O0F3aSso+JDWqTWmTmzcQKted54IAdUVbxE+j/MVxUsKa8L20HJhv3vUezVPoquqWjA==}
@@ -1262,16 +1249,16 @@ packages:
     resolution: {integrity: sha512-KdHvFWZjEKDf0cakgFjebl371GPsISX2oZHcuyKqM7DtogIsHrqKeLTo8wBHxaXRAQlY2PsPlZmfo+9ZCxEREQ==}
     engines: {node: '>=10'}
 
-  node-addon-api@8.7.0:
-    resolution: {integrity: sha512-9MdFxmkKaOYVTV+XVRG8ArDwwQ77XIgIPyKASB1k3JPq3M8fGQQQE3YpMOrKm6g//Ktx8ivZr8xo1Qmtqub+GA==}
+  node-addon-api@8.8.0:
+    resolution: {integrity: sha512-c5Ko1fZJIJmzhFIkhRN76WTq+fC6tWnGy9CXA0fA+XygsWZmEwG8vmbkNqxMyoaa0Tin4djul49NzdVcJJcjeA==}
     engines: {node: ^18 || ^20 || >= 21}
 
   node-gyp-build@4.8.4:
     resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
     hasBin: true
 
-  numkong@7.6.0:
-    resolution: {integrity: sha512-IOQ/4Va1xpUB/B4I9BYrOGT1AkiRXHIrLbR/pAKSXFTyPxG8iYQl3VvMe2wckV+Al01xKWLM3H0E4UhYY5Iyaw==}
+  numkong@7.7.0:
+    resolution: {integrity: sha512-gjwoFHoXk9w44cnDz0Q4PXBV3oiFopfhLwqbNcn8KRoScRFAFQ94ugEie5dFoBtKeLBWqVAnb2dysn8epngsog==}
     engines: {node: '>=22.0.0'}
 
   object-assign@4.1.1:
@@ -1862,22 +1849,22 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@numkong/darwin-arm64@7.6.0':
+  '@numkong/darwin-arm64@7.7.0':
     optional: true
 
-  '@numkong/darwin-x64@7.6.0':
+  '@numkong/darwin-x64@7.7.0':
     optional: true
 
-  '@numkong/linux-arm64@7.6.0':
+  '@numkong/linux-arm64@7.7.0':
     optional: true
 
-  '@numkong/linux-x64@7.6.0':
+  '@numkong/linux-x64@7.7.0':
     optional: true
 
-  '@numkong/win32-arm64@7.6.0':
+  '@numkong/win32-arm64@7.7.0':
     optional: true
 
-  '@numkong/win32-x64@7.6.0':
+  '@numkong/win32-x64@7.7.0':
     optional: true
 
   '@opentelemetry/api@1.9.1': {}
@@ -2799,22 +2786,22 @@ snapshots:
     dependencies:
       semver: 7.8.1
 
-  node-addon-api@8.7.0: {}
+  node-addon-api@8.8.0: {}
 
   node-gyp-build@4.8.4: {}
 
-  numkong@7.6.0:
+  numkong@7.7.0:
     dependencies:
       bindings: 1.5.0
-      node-addon-api: 8.7.0
+      node-addon-api: 8.8.0
       node-gyp-build: 4.8.4
     optionalDependencies:
-      '@numkong/darwin-arm64': 7.6.0
-      '@numkong/darwin-x64': 7.6.0
-      '@numkong/linux-arm64': 7.6.0
-      '@numkong/linux-x64': 7.6.0
-      '@numkong/win32-arm64': 7.6.0
-      '@numkong/win32-x64': 7.6.0
+      '@numkong/darwin-arm64': 7.7.0
+      '@numkong/darwin-x64': 7.7.0
+      '@numkong/linux-arm64': 7.7.0
+      '@numkong/linux-x64': 7.7.0
+      '@numkong/win32-arm64': 7.7.0
+      '@numkong/win32-x64': 7.7.0
 
   object-assign@4.1.1: {}
 
