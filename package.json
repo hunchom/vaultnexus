@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "demo": "VAULTNEXUS_VAULT=$PWD/demo-vault-seeded VAULTNEXUS_INDEX_SNAPSHOT=off tsx src/daemon/main.ts",
+    "smoke": "node scripts/mcp-smoke.mjs",
     "dev:daemon": "tsx src/daemon/main.ts",
     "dev:bridge": "tsx src/bridge/main.ts",
     "eval": "tsx src/eval/run.ts",

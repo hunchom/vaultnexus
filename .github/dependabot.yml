@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      ai-sdk:
+        patterns:
+          - "@ai-sdk/*"
+          - "ai"
+      types:
+        patterns:
+          - "@types/*"
+      dev:
+        patterns:
+          - "vitest"
+          - "tsx"
+          - "typescript"
+    ignore:
+      # better-sqlite3 native module is sensitive to Node ABI changes; bump manually after testing.
+      - dependency-name: "better-sqlite3"
+
+  - package-ecosystem: npm
+    directory: /obsidian-plugin
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci(deps)"
