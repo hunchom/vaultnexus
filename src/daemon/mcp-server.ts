@@ -45,6 +45,26 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         return { content: [{ type: 'text', text: JSON.stringify(bridges) }] };
       },
     );
+
+    server.registerTool(
+      'vaultnexus_trace',
+      {
+        description:
+          'Reasoning backbone: ordered citation chain (seed → wikilink → knn hops) over the vault. Each hop cites notePath + byte offsets and the edge that introduced it. No LLM compose; the chain is the contract.',
+        inputSchema: {
+          question: z.string(),
+          maxDepth: z.number().int().nonnegative().optional(),
+          kSeeds: z.number().int().positive().optional(),
+          knnPerHop: z.number().int().positive().optional(),
+          simThreshold: z.number().optional(),
+          maxHops: z.number().int().positive().optional(),
+        },
+      },
+      async ({ question, maxDepth, kSeeds, knnPerHop, simThreshold, maxHops }) => {
+        const hops = await index.trace(question, { maxDepth, kSeeds, knnPerHop, simThreshold, maxHops });
+        return { content: [{ type: 'text', text: JSON.stringify({ hops }) }] };
+      },
+    );
   }
   return server;
 }
