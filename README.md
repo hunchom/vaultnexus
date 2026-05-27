@@ -33,7 +33,7 @@ No cloud round-trip on query.
 [![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-plugin-7c3aed?logo=obsidian)](https://obsidian.md/)
 
-[Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](#architecture) · [MCP tools](#mcp-tools) · [Configuration](#configuration)
+[Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](docs/ARCHITECTURE.md) · [MCP tools](#mcp-tools) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
