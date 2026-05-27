@@ -5,6 +5,7 @@ import { createMcpServer } from '../../src/daemon/mcp-server.js';
 import { VaultIndex } from '../../src/daemon/vault-index.js';
 import { FakeEmbedder } from '../../src/core/embedder.js';
 import { FakeChatModel } from '../../src/core/fake-chat-model.js';
+import type { ChatModel } from '../../src/core/chat-model.js';
 
 async function connect(server: ReturnType<typeof createMcpServer>): Promise<Client> {
   const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -41,6 +42,33 @@ describe('vaultnexus_reason MCP tool', () => {
     expect(parsed.hops.length).toBeGreaterThan(0);
     expect(parsed.model).toBe('fake');
     expect(parsed.answer).toContain('[fake-compose]');
+    expect(parsed.invalidCitations).toEqual([]);
+    await client.close();
+  });
+
+  it('roundtrip: mixed valid+fabricated citations → invalidCitations surfaces fake (Plan 18)', async () => {
+    // chat model picks first real [ref:...] from user prompt, appends a fabricated one
+    const echoCiteAndFake: ChatModel = {
+      id: 'cite-fake',
+      async compose(messages) {
+        const user = messages.find((m) => m.role === 'user')?.content ?? '';
+        const m = user.match(/\[ref:[^:\]]+:\d+-\d+\]/);
+        const goodRef = m ? m[0] : '[ref:none.md:0-1]';
+        return `valid ${goodRef} plus fake [ref:nonexistent.md:99-100].`;
+      },
+    };
+    const idx = new VaultIndex(new FakeEmbedder(64), undefined, echoCiteAndFake);
+    await idx.addNote('A.md', '# A\n\nthe central topic\n\nlink [[B]]\n');
+    await idx.addNote('B.md', '# B\n\nrelated body content\n');
+    const client = await connect(createMcpServer({ index: idx }));
+    const res = await client.callTool({
+      name: 'vaultnexus_reason',
+      arguments: { question: 'the central topic', maxDepth: 1, kSeeds: 2 },
+    });
+    const parsed = JSON.parse((res.content as Array<{ type: string; text: string }>)[0].text);
+    expect(Array.isArray(parsed.invalidCitations)).toBe(true);
+    expect(parsed.invalidCitations).toEqual(['[ref:nonexistent.md:99-100]']);
+    expect(parsed.model).toBe('cite-fake');
     await client.close();
   });
 
