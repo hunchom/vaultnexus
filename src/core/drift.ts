@@ -49,3 +49,41 @@ export function conviction(text: string): number {
   for (const w of ASSERTION_WORDS_V1) assertions += countTerm(lower, w);
   return (assertions - hedges) / total;
 }
+
+// Least-squares slope of y vs t. n<2 → 0. Zero t-variance (all dates equal) → 0 (guard div-by-zero).
+function leastSquaresSlope(points: Array<{ t: number; y: number }>): number {
+  if (points.length < 2) return 0;
+  const n = points.length;
+  const tMean = points.reduce((s, p) => s + p.t, 0) / n;
+  const yMean = points.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const p of points) {
+    const dt = p.t - tMean;
+    num += dt * (p.y - yMean);
+    den += dt * dt;
+  }
+  if (den === 0) return 0;
+  return num / den;
+}
+
+// date string → days from anchor (Date.parse / 86_400_000 ms). Anchor = first sample's parsed ms.
+function toDays(date: string, anchorMs: number): number {
+  return (Date.parse(date) - anchorMs) / 86_400_000;
+}
+
+/** Slope of conviction over days-since-first. n<2 → 0. Equal-date case → 0. */
+export function convictionSlope(samples: Array<{ date: string; score: number }>): number {
+  if (samples.length < 2) return 0;
+  const anchor = Date.parse(samples[0].date);
+  const points = samples.map((s) => ({ t: toDays(s.date, anchor), y: s.score }));
+  return leastSquaresSlope(points);
+}
+
+/** Slope of supporting-claim count over days-since-first. n<2 → 0. Equal-date case → 0. */
+export function supportingClaimSlope(samples: Array<{ date: string; count: number }>): number {
+  if (samples.length < 2) return 0;
+  const anchor = Date.parse(samples[0].date);
+  const points = samples.map((s) => ({ t: toDays(s.date, anchor), y: s.count }));
+  return leastSquaresSlope(points);
+}
