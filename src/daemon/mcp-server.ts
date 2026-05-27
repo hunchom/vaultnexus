@@ -97,7 +97,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
       'vaultnexus_recall_history',
       {
         description:
-          'Cited natural-language narration of how a single note\'s stance shifted across its git timeline. Walks vaultnexus_history under the hood, then composes via LLM. Every cited revision is a real git SHA from the timeline ([sha:<7> @ <YYYY-MM-DD>]); the prompt forbids fabricated SHAs. Returns { narration, revisions, model } — model id reported for transparency. < 2 revisions → fallback narration, no LLM call.',
+          'Cited natural-language narration of how a single note\'s stance shifted across its git timeline. Walks vaultnexus_history under the hood, then composes via LLM. Every cited revision is a real git SHA from the timeline ([sha:<7> @ <YYYY-MM-DD>]); the prompt forbids fabricated SHAs and a post-hoc regex check surfaces any that slip through. Returns { narration, revisions, invalidShaCitations, model } — invalidShaCitations holds the raw markers whose SHA prefix matches no revision; empty array = clean. < 2 revisions → fallback narration, no LLM call.',
         inputSchema: {
           notePath: z.string(),
           since: z.string().optional(),

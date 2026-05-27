@@ -186,7 +186,7 @@ export class VaultIndex {
   async narrateHistory(
     notePath: string,
     opts: NarrateOptions = {},
-  ): Promise<{ narration: string; revisions: Revision[] }> {
+  ): Promise<{ narration: string; revisions: Revision[]; invalidShaCitations: string[] }> {
     if (!this.chatModel) {
       throw new Error(
         'narrateHistory() requires a ChatModel — pass via new VaultIndex(embedder, vaultPath, chatModel)',
@@ -197,6 +197,7 @@ export class VaultIndex {
       return {
         narration: 'Note has fewer than two revisions; no stance shift to narrate.',
         revisions: [],
+        invalidShaCitations: [],
       };
     }
     return narrateRecallHistory(this.vaultPath, this.chatModel, notePath, opts);
