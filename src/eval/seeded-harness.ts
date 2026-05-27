@@ -3,8 +3,8 @@
  *    1. seeds the Plan 14 vault into a temp dir → recursively loads notes/**\/*.md
  *    2. indexes every chunk via VaultIndex
  *    3. runs SEEDED_GOLD_QUERIES → recall@1/3/10, nDCG@10, MRR
- *    4. supports an FTS-only mode for leakage measurement (vector path short-circuited
- *       by a constant-vector embedder → fused rank is FTS-driven via RRF).
+ *    4. supports an FTS-only mode for leakage measurement (vector list weighted to 0
+ *       in RRF fusion → fused rank is FTS-driven). Cleaner than embedder swapping.
  *
  *  Multi-target semantics: any-of. A query "hits at K" when any of its targets appears
  *  in the top-K ranked notes.
@@ -82,11 +82,9 @@ function rankedNotes(hits: { notePath: string; score: number }[]): string[] {
 }
 
 /** Constant-vector embedder → every chunk + query maps to the same unit vector.
- *  Cosine similarity collapses to 1 everywhere; the vector ranker degenerates,
- *  and RRF fusion is driven by FTS5 alone. Used for leakage measurement.
- *
- *  Why a real Embedder shape: VaultIndex hard-codes embed() calls + dims, so a
- *  drop-in is cleaner than threading a short-circuit flag through the index. */
+ *  Retained as a self-contained sanity check that l2normalize + dotF32 behave on
+ *  collapsed inputs. Not used by the FTS-only path anymore (that now threads
+ *  ftsOnly through QueryOptions → fuseRRF weights [0,1]). */
 export class ConstantEmbedder implements Embedder {
   readonly dimensions: number;
   private readonly v: Float32Array;
@@ -104,7 +102,7 @@ export class ConstantEmbedder implements Embedder {
 }
 
 export interface RunOptions {
-  /** When true → use ConstantEmbedder regardless of embedder arg (leakage probe). */
+  /** When true → vector list weighted to 0 in RRF fusion; FTS5 alone ranks. */
   ftsOnly?: boolean;
   /** Vector + FTS fetch breadth + recall@k cut. Default 10. */
   k?: number;
@@ -141,16 +139,16 @@ export async function runSeededEval(
   opts: RunOptions = {},
 ): Promise<SeededEvalResult> {
   const k = opts.k ?? 10;
-  const probe: Embedder = opts.ftsOnly ? new ConstantEmbedder(embedder.dimensions) : embedder;
-  const idx = new VaultIndex(probe);
+  const idx = new VaultIndex(embedder);
   for (const { path, source } of loadSeededCorpus(vaultRoot)) await idx.addNote(path, source);
 
   const perQuery: SeededPerQuery[] = [];
   for (const q of queries) {
-    // Plan 25: optional router/diversity flow through to VaultIndex.query.
+    // Plan 25: optional router/diversity/ftsOnly flow through to VaultIndex.query.
     const hits = await idx.query(q.query, k * 4, {
       router: opts.router,
       diversity: opts.diversity,
+      ftsOnly: opts.ftsOnly,
     });
     const ranked = rankedNotes(hits);
     const tgt = new Set(q.targets);

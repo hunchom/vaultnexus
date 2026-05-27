@@ -12,6 +12,7 @@ import { FakeEmbedder } from '../../src/core/embedder.js';
 import { seedDemoVault } from '../../scripts/seed-demo-vault.js';
 import { runSeededEval, ConstantEmbedder } from '../../src/eval/seeded-harness.js';
 import { SEEDED_GOLD_QUERIES } from '../../src/eval/seeded-gold.js';
+import { dotF32 } from '../../src/core/vectors.js';
 
 describe('runSeededEval against Plan 14 seeded vault', () => {
   let vaultDir: string;
@@ -48,11 +49,14 @@ describe('runSeededEval against Plan 14 seeded vault', () => {
     expect(r.recallAt1).toBeLessThan(0.4);
   });
 
-  it('ConstantEmbedder collapses vector path → multiple chunks share max cosine', async () => {
-    // Sanity check on the leakage probe → constant vectors produce constant cosine,
-    // so any ranking signal is FTS5 RRF. Without this property, T3's interpretation breaks.
+  it('ConstantEmbedder emits unit-norm vectors → collapsed cosine = 1 for any pair', async () => {
+    // Sanity check: l2normalize + dotF32 invariants on the constant-vector probe.
+    // a==b → equal arrays; ||a||=1 → unit norm; <a,b>=1 → fully-collapsed cosine.
+    // Used as a regression on the math primitives that underlie the leakage floor.
     const ce = new ConstantEmbedder(8);
     const [a, b] = await ce.embed(['hello', 'world']);
     expect(a).toEqual(b);
+    expect(Math.abs(dotF32(a, a) - 1)).toBeLessThan(1e-6);
+    expect(Math.abs(dotF32(a, b) - 1)).toBeLessThan(1e-6);
   });
 });

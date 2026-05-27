@@ -19,111 +19,111 @@ export interface GoldQuery {
 export const SEEDED_GOLD_QUERIES: GoldQuery[] = [
   // ── decisions cluster (9) ──────────────────────────────────────────────────
   {
-    query: 'a wager I am putting in writing today about the trajectory of general-purpose research assistants over the next few years',
+    query: 'a bookmark I want my future self to grade about how capable autonomous task-doing software might become for knowledge jobs by late this decade',
     targets: ['notes/decisions/ai-capabilities-2027.md'],
   },
   {
-    query: 'when fast pattern recognition by an expert beats writing out a structured argument',
+    query: 'when accumulated tacit experience should override the impulse to lay every step out explicitly before acting',
     targets: ['notes/decisions/intuition-vs-analysis.md'],
   },
   {
-    query: 'why quick iteration through perception, framing, choice, and execution outperforms careful planning under time pressure',
+    query: 'why rapidly cycling between noticing, sense-making, choosing, and moving wins over deliberate plan-refinement when adversaries are also adapting',
     targets: ['notes/decisions/ooda-loop-fast.md'],
   },
   {
-    query: 'commitment that consistent publishing cadence will grow my readership to a specific audience size by a target date',
+    query: 'a written-down bet linking how often I post longform pieces over a two-year horizon to crossing a specific traffic threshold on my own writing site',
     targets: ['notes/decisions/personal-blog-growth.md'],
   },
   {
-    query: 'imagining catastrophic project failure ahead of time to surface tripwires and assumptions before launch',
+    query: 'rehearsing the headline of a disaster post-mortem before the work even begins so warning signs and stop-conditions get named upfront',
     targets: ['notes/decisions/premortem-checklist.md'],
   },
   {
-    query: 'looking back from older age and weighing the things I did against the things I declined',
+    query: 'the Bezos heuristic of imagining oneself elderly looking backward, biasing toward attempt rather than abstain when the call is genuinely close',
     targets: ['notes/decisions/regret-minimization-frame.md'],
   },
   {
-    query: 'expecting in-person attendance requirements at large employers to harden rather than soften over the next eighteen months',
+    query: 'why I expect the post-pandemic flexible-location norm to keep tightening into hybrid mandates by the middle of next year',
     targets: ['notes/decisions/remote-work-future.md'],
   },
   {
-    query: 'how many hours of focused effort per week translate into working fluency in a new systems language within roughly a year and a half',
+    query: 'estimating the calendar time and weekly investment needed to reach intermediate competence in Rust starting from zero',
     targets: ['notes/decisions/skill-acquisition-rate.md'],
   },
   {
-    query: 'why money already spent should not influence whether to continue an investment, and the auction reframe that helps me stop honoring it',
+    query: 'the pitfall of letting irretrievable prior outlay shape ongoing allocation; cured by mentally re-tendering the same hours or dollars among today\'s competing uses as if no history existed',
     targets: ['notes/decisions/sunk-cost-trap.md'],
   },
 
   // ── productivity cluster (9) ───────────────────────────────────────────────
   {
-    query: 'treating my schedule as something I declare rather than read, and defending named appointments against incoming requests',
+    query: 'using a schedule as an active authoring surface; intentions go on the grid in advance so any inbound interruption has to evict an existing commitment to land',
     targets: ['notes/productivity/calendar-blocking.md'],
   },
   {
-    query: 'how unexpectedly costly it is to jump between unrelated kinds of work and the bug rate that follows the resumption',
+    query: 'the hidden tax of swapping between dissimilar tasks: extra minutes to refill working memory and elevated mistakes in the code touched right after',
     targets: ['notes/productivity/context-switching-cost.md'],
   },
   {
-    query: 'a ninety- to one-hundred-twenty-minute uninterrupted stretch on a single hard problem with messaging closed',
+    query: 'protected window roughly two hours long for one demanding cognitive task with notifications silenced and a clear exit goal',
     targets: ['notes/productivity/deep-work-blocks.md'],
   },
   {
-    query: 'why a periodic backwards-looking ritual is the load-bearing habit that keeps the rest of my system functioning',
+    query: 'arguing that my whole personal operating system hinges on the recurring retrospective and falls apart whenever I omit it',
     targets: ['notes/productivity/gtd-effectiveness.md'],
   },
   {
-    query: 'the five-step loop of grab everything, decide what it is, sort, look back, then do — most failures come from skipping the middle steps',
+    query: 'David Allen\'s canonical method for managing knowledge tasks — common dismissals usually trace to executing only a couple of phases while blaming the methodology, when the dropped stages are exactly what would have caught the breakage',
     targets: ['notes/productivity/gtd-overview.md'],
   },
   {
-    query: 'protecting against background dread from week-old unread messages by emptying the queue twice weekly without ritual perfectionism',
+    query: 'a relaxed posture toward digital-message-pile-management — biweekly drain sessions, no obsession over a clean state, just stopping any item from lingering past a couple of sunsets and morphing into low-grade anxiety',
     targets: ['notes/productivity/inbox-zero-strategy.md'],
   },
   {
-    query: 'why a half-hour interruption dropped into the afternoon of someone doing deep creative work destroys the whole afternoon',
+    query: 'two operating modes for a working week — one that absorbs short conversations cheaply and one that needs uninterrupted afternoons or its output collapses far beyond the conversation length',
     targets: ['notes/productivity/maker-vs-manager.md'],
   },
   {
-    query: 'a Sunday-afternoon forty-five-minute ritual with a coffee where I process captures, walk the project list, and look ahead at the coming days',
+    query: 'my standing weekend appointment with myself where I clear pending captures, audit each active commitment, and preview the upcoming seven days',
     targets: ['notes/productivity/weekly-review-protocol.md'],
   },
   {
-    query: 'why twenty-five-minute slices with five-minute pauses ultimately disrupted my hardest thinking even after fixing a starting-friction problem',
+    query: 'abandoning the tomato-shaped countdown gadget after half a year — the enforced cadence kept severing whichever delicate thread of reasoning I was chasing',
     targets: ['notes/productivity/why-i-quit-pomodoro.md'],
   },
 
   // ── tools cluster (8) ──────────────────────────────────────────────────────
   {
-    query: 'each entry should encode one self-contained claim small enough to be linked to but big enough to stand on its own',
+    query: 'each Zettel should hold exactly one indecomposable thesis — concise enough to cite, fat enough to argue with as an independent unit',
     targets: ['notes/tools/atomic-notes-principle.md'],
   },
   {
-    query: 'the bet that storing thoughts in plain text and a human-readable convention will outlive any single application that reads them',
+    query: 'betting that storing my writing as a tiny conventional pseudo-code legible by any unix tool will outlive whatever shiny editor is currently fashionable',
     targets: ['notes/tools/markdown-portability.md'],
   },
   {
-    query: 'how aggressively to chop a developing thought into separate entries — too granular fragments the graph, too coarse hides connections inside paragraphs',
+    query: 'calibrating how coarsely or finely to slice an evolving train of reasoning into separate files — over-shred and the resulting web is useless rubble, under-shred and the cross-concept seams get buried in running prose',
     targets: ['notes/tools/note-density-tradeoff.md'],
   },
   {
-    query: 'choosing between typing a query to retrieve versus walking the structure to explore, and when each fits the task',
+    query: 'two retrieval strategies inside a knowledge store — typing exact remembered fragments to pull a passage versus surfing outward from a familiar anchor when the destination is hazy',
     targets: ['notes/tools/search-vs-browse.md'],
   },
   {
-    query: 'why flashcard drilling is oversold for general knowledge work and only earns its keep on discrete recall like vocabulary or syntax I touch rarely',
+    query: 'the cult around timed-flashcard apps oversells their payoff for deep conceptual work; they really shine only for niche lookup-style recall I rarely encounter',
     targets: ['notes/tools/spaced-repetition-utility.md'],
   },
   {
-    query: 'starting a thin computational layer on top of my plain-text knowledge store to surface unseen connections and narrate how my positions have moved',
+    query: 'kicking off the experimental tool that augments my flat-file repository: hidden semantic overlaps among entries, traceable reasoning chains for questions, and a retelling of how my expressed opinions have evolved over revisions',
     targets: ['notes/tools/this-vaultnexus-experiment.md'],
   },
   {
-    query: 'the single feature that pinned my long-term editor choice: writing flat files I can grep, version-control, and outlive the vendor',
+    query: 'after trying every other note-taking app on the market the one trait that settled my choice for a decade-scale commitment was that my data on disk stays accessible to every commandline utility I already know',
     targets: ['notes/tools/why-obsidian.md'],
   },
   {
-    query: 'a directed reference inside prose carries reasoning, while a category label only buckets — they are not interchangeable connection types',
+    query: 'an inline cross-reference embedded mid-sentence is doing different cognitive work than a hashtag classifier; swapping one for the other surrenders the why',
     targets: ['notes/tools/wikilinks-vs-tags.md'],
   },
 ];
