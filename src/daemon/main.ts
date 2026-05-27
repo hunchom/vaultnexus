@@ -3,7 +3,7 @@ import { createServer, type Socket } from 'node:net';
 import { existsSync, rmSync } from 'node:fs';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
-import { defaultSocketPath, defaultLockPath } from '../core/paths.js';
+import { defaultSocketPath, defaultLockPath, defaultIndexSnapshotPath } from '../core/paths.js';
 import { acquireSingleInstanceLock, lockFailureMessage } from './lock.js';
 import { createMcpServer } from './mcp-server.js';
 import { SocketServerTransport } from './socket-transport.js';
@@ -12,6 +12,8 @@ import { selectEmbedder } from './select-embedder.js';
 import { selectChatModel } from './select-chat-model.js';
 import { VaultIndex } from './vault-index.js';
 import { indexVault } from './indexer.js';
+import { IndexSnapshot } from './index-snapshot.js';
+import { restoreOrRebuildIndex } from './index-restore.js';
 
 async function main(): Promise<void> {
   const socketPath = defaultSocketPath();
@@ -38,10 +40,26 @@ async function main(): Promise<void> {
   const chatModel = selectChatModel(process.env);
   process.stderr.write(`vaultnexus: chat model = ${chatModel.id}\n`);
   const vaultDir = process.env.VAULTNEXUS_VAULT;
-  const index = new VaultIndex(embedder, vaultDir, chatModel);
-  if (vaultDir) {
-    const n = await indexVault(vaultDir, index);
-    process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);
+  const snapPath = defaultIndexSnapshotPath(process.env);
+  let snapshot: IndexSnapshot | null = null;
+  let index: VaultIndex;
+  if (vaultDir && snapPath !== 'off') {
+    // Plan 26 — restore unchanged notes from disk, rebuild only the deltas
+    snapshot = new IndexSnapshot(snapPath);
+    const t0 = process.hrtime.bigint();
+    const { index: idx, stats } = await restoreOrRebuildIndex(vaultDir, embedder, snapshot, chatModel);
+    index = idx;
+    const ms = Number((process.hrtime.bigint() - t0) / 1_000_000n);
+    process.stderr.write(
+      `vaultnexus: indexed ${stats.total} notes from ${vaultDir} ` +
+      `(restored=${stats.restored} rebuilt=${stats.rebuilt} pruned=${stats.pruned}, ${ms}ms)\n`,
+    );
+  } else {
+    index = new VaultIndex(embedder, vaultDir, chatModel);
+    if (vaultDir) {
+      const n = await indexVault(vaultDir, index);
+      process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);
+    }
   }
 
   const socketServer = createServer((socket: Socket) => {
@@ -72,6 +90,7 @@ async function main(): Promise<void> {
     if (existsSync(socketPath)) rmSync(socketPath);
     const e = embedder as { close?: () => void };
     if (typeof e.close === 'function') e.close(); // release cache db handle
+    if (snapshot) snapshot.close(); // release index snapshot db handle
     await release();
     process.exit(0);
   };

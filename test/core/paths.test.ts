@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultSocketPath, defaultLockPath } from '../../src/core/paths.js';
+import { defaultSocketPath, defaultLockPath, defaultIndexSnapshotPath } from '../../src/core/paths.js';
+import { homedir } from 'node:os';
 
 const savedSock = process.env.VAULTNEXUS_SOCKET;
 const savedLock = process.env.VAULTNEXUS_LOCK;
@@ -26,5 +27,11 @@ describe('paths', () => {
     process.env.VAULTNEXUS_LOCK = '/tmp/custom.lock';
     expect(defaultSocketPath()).toBe('/tmp/custom.sock');
     expect(defaultLockPath()).toBe('/tmp/custom.lock');
+  });
+
+  it('defaultIndexSnapshotPath defaults under ~/.vaultnexus + honors env override', () => {
+    expect(defaultIndexSnapshotPath({})).toBe(join(homedir(), '.vaultnexus', 'index-snapshot.db'));
+    expect(defaultIndexSnapshotPath({ VAULTNEXUS_INDEX_SNAPSHOT: '/tmp/snap.db' })).toBe('/tmp/snap.db');
+    expect(defaultIndexSnapshotPath({ VAULTNEXUS_INDEX_SNAPSHOT: 'off' })).toBe('off');
   });
 });

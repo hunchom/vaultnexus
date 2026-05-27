@@ -15,3 +15,8 @@ export function defaultLockPath(): string {
 export function defaultCachePath(env: Record<string, string | undefined> = process.env): string {
   return env.VAULTNEXUS_CACHE ?? join(homedir(), '.vaultnexus', 'embeddings.db');
 }
+
+/** On-disk VaultIndex snapshot (chunks + f32 vecs + note meta). 'off' disables. */
+export function defaultIndexSnapshotPath(env: Record<string, string | undefined> = process.env): string {
+  return env.VAULTNEXUS_INDEX_SNAPSHOT ?? join(homedir(), '.vaultnexus', 'index-snapshot.db');
+}
