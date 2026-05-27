@@ -120,6 +120,18 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     );
 
     server.registerTool(
+      'vaultnexus_forecasts',
+      {
+        description:
+          'Walk vault frontmatter forecast: { claim, by, marked_at, probability? } → ledger. Partitions into pending + resolved (notes adding resolved: { outcome, resolved_at }) and reports global Brier score across resolved. Probability defaults to 0.5 when omitted. brier = null when zero resolved forecasts. Returns { pending: Forecast[], resolved: ResolvedForecast[], brier: number|null }.',
+      },
+      async () => {
+        const ledger = await index.forecasts();
+        return { content: [{ type: 'text', text: JSON.stringify(ledger) }] };
+      },
+    );
+
+    server.registerTool(
       'vaultnexus_trace',
       {
         description:
