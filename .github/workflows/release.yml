@@ -1,0 +1,62 @@
+name: Release artifacts
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to attach artifacts to'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: install (root)
+        run: pnpm install --frozen-lockfile
+
+      - name: install (obsidian-plugin)
+        working-directory: obsidian-plugin
+        run: pnpm install --ignore-workspace --no-frozen-lockfile
+
+      - name: build daemon + bridge
+        run: pnpm run build
+
+      - name: build obsidian plugin
+        working-directory: obsidian-plugin
+        run: node esbuild.config.mjs
+
+      - name: bundle obsidian plugin .zip
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          DIR="vaultnexus-plugin-${TAG}"
+          mkdir -p "${DIR}"
+          cp obsidian-plugin/main.js obsidian-plugin/manifest.json "${DIR}/"
+          echo "/* CSS is inlined at runtime via injectStyles() — see SettingsTab.ts and SearchView.ts. */" > "${DIR}/styles.css"
+          zip -r "${DIR}.zip" "${DIR}"
+          echo "PLUGIN_ZIP=${DIR}.zip" >> $GITHUB_ENV
+
+      - name: build mcpb bundle
+        run: pnpm exec tsx scripts/build-mcpb.ts
+
+      - name: upload artifacts to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "${TAG}" "${PLUGIN_ZIP}" dist-mcpb/*.mcpb --clobber
