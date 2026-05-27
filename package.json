@@ -17,7 +17,8 @@
     "dev:daemon": "tsx src/daemon/main.ts",
     "dev:bridge": "tsx src/bridge/main.ts",
     "eval": "tsx src/eval/run.ts",
-    "seed:demo": "tsx scripts/seed-demo-vault.ts"
+    "seed:demo": "tsx scripts/seed-demo-vault.ts",
+    "drift": "tsx src/eval/drift-check.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
