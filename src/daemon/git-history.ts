@@ -50,7 +50,13 @@ export async function noteRevisions(
   if (opts.since) args.push(`--since=${opts.since}`);
   if (opts.until) args.push(`--until=${opts.until}`);
   args.push('--', notePath);
-  const { stdout } = await exec('git', args, { maxBuffer: MAX_BUF });
+  let stdout: string;
+  try {
+    ({ stdout } = await exec('git', args, { maxBuffer: MAX_BUF }));
+  } catch {
+    // virgin repo / no HEAD → git log exits non-zero. Treat as "no history".
+    return [];
+  }
   if (!stdout.trim()) return [];
   const all: Revision[] = stdout.split('\n').filter((l) => l.length > 0).map((line) => {
     const [sha, commitDate, message, authorEmail] = line.split(NUL);

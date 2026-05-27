@@ -83,6 +83,66 @@ describe('git-history', () => {
   });
 });
 
+describe('git-history edge cases', () => {
+  it('noteRevisions: [] when repoPath is not a git worktree', async () => {
+    const nonGit = mkdtempSync(join(tmpdir(), 'vn-edge-nogit-'));
+    try { expect(await noteRevisions(nonGit, 'notes/a.md')).toEqual([]); }
+    finally { rmSync(nonGit, { recursive: true, force: true }); }
+  });
+
+  it('noteRevisions: [] for a file never committed', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vn-edge-uncommitted-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main', repo]);
+      mkdirSync(join(repo, 'notes'));
+      writeFileSync(join(repo, 'notes/a.md'), 'never committed\n');
+      expect(await noteRevisions(repo, 'notes/a.md')).toEqual([]);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it('noteRevisions: maxRevisions caps the returned slice', async () => {
+    const fx = seedRepo();
+    try {
+      const revs = await noteRevisions(fx.repo, 'notes/a.md', { maxRevisions: 2 });
+      expect(revs.length).toBe(2);
+    } finally { fx.cleanup(); }
+  });
+
+  it('noteRevisions: since filter excludes earlier commits', async () => {
+    const fx = seedRepo();
+    try {
+      // since=2024-02-15 → only c3 (2024-03-01) passes; c1 (2024-01-01) + c2 (2024-02-01) excluded
+      const revs = await noteRevisions(fx.repo, 'notes/a.md', { since: '2024-02-15' });
+      expect(revs.length).toBe(1);
+      expect(Date.parse(revs[0].commitDate)).toBeGreaterThan(Date.parse('2024-02-15'));
+    } finally { fx.cleanup(); }
+  });
+
+  it('noteRevisions: --follow surfaces history across renames', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vn-edge-rename-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main', repo]);
+      mkdirSync(join(repo, 'notes'));
+      const env = (d: string): NodeJS.ProcessEnv => ({
+        ...process.env,
+        GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d,
+        GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t',
+      });
+      writeFileSync(join(repo, 'notes/a.md'), 'A\n');
+      execFileSync('git', ['-C', repo, 'add', '.']);
+      execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'add a'],
+        { env: env('2024-01-01T00:00:00Z') });
+      renameSync(join(repo, 'notes/a.md'), join(repo, 'notes/b.md'));
+      execFileSync('git', ['-C', repo, 'add', '-A']);
+      execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'rename a→b'],
+        { env: env('2024-02-01T00:00:00Z') });
+      const revs = await noteRevisions(repo, 'notes/b.md');
+      expect(revs.length).toBe(2);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+});
+
 describe('VaultIndex.history', () => {
   let fx: { repo: string; cleanup: () => void };
   beforeAll(() => { fx = seedRepo(); });
