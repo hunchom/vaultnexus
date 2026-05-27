@@ -14,15 +14,6 @@ export interface DriftCheckResult {
   revisions: number;
 }
 
-// CLI tuning vs library defaults (concept §10.9): library minCS=0.0005 was a guess; the canonical
-// Plan 14 fixture's conviction-slope is ≈0.00033/day across 221 days, below 0.0005. The CLI
-// surfaces realistic drift events for users, so we use a tuned default here. The §10.9 spike
-// re-tunes both against owner-labeled corpora; library defaults stay frozen for that calibration.
-const CLI_DEFAULT_OPTS: DriftOpts = {
-  minConvictionSlope: 0.0002,
-  maxSupportingSlope: 0.005,
-};
-
 /**
  * Walk git history for `notePath` in `vaultPath`, compute drift signal.
  *
@@ -32,7 +23,7 @@ const CLI_DEFAULT_OPTS: DriftOpts = {
 export async function runDriftCheck(
   vaultPath: string,
   notePath: string,
-  opts: DriftOpts = CLI_DEFAULT_OPTS,
+  opts: DriftOpts = {},
 ): Promise<DriftCheckResult> {
   const revs = await noteRevisions(vaultPath, notePath);
   if (revs.length === 0) return { flag: null, revisions: 0 };

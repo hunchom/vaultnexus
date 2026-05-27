@@ -95,7 +95,9 @@ export interface DriftRevision {
   supportingClaimCount: number;
 }
 
-/** Tunables for the drift rule. Defaults: minCS 0.0005 pts/day, maxSS 0.005 links/day. */
+/** Tunables for the drift rule. Defaults: minCS 0.0003 pts/day, maxSS 0.005 links/day. */
+// minCS=0.0003 anchored to Plan 14 canonical fixture (≈0.00033/day, 221d) w/ small margin.
+// §10.9 spike re-tunes against owner-labeled corpora; v1 freeze for now.
 export interface DriftOpts {
   minConvictionSlope?: number;
   maxSupportingSlope?: number;
@@ -114,7 +116,7 @@ export function driftFlag(
   opts: DriftOpts = {},
 ): DriftEvent | null {
   if (revisions.length < 3) return null;
-  const minCS = opts.minConvictionSlope ?? 0.0005;
+  const minCS = opts.minConvictionSlope ?? 0.0003;
   const maxSS = opts.maxSupportingSlope ?? 0.005;
   const samples = revisions.map((r) => ({
     date: r.date,
