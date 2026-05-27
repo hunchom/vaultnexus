@@ -9,6 +9,8 @@ import { extractWikilinks } from '../core/wikilinks.js';
 import { buildNoteGraph, detectCommunities, resolveLink } from './note-graph.js';
 import { traceReasoning, type ReasonHop, type TraceFacade, type TraceOptions } from './reason-trace.js';
 import { noteRevisions, type HistoryOptions, type Revision } from './git-history.js';
+import type { ChatModel, ChatComposeOpts } from '../core/chat-model.js';
+import { composeAnswer } from './reason-compose.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -38,7 +40,13 @@ export class VaultIndex {
   constructor(
     private readonly embedder: Embedder,
     private readonly vaultPath?: string,
+    private readonly chatModel?: ChatModel,
   ) {}
+
+  /** Chat model id for transparency (returned in vaultnexus_reason). 'none' when unset. */
+  chatModelId(): string {
+    return this.chatModel?.id ?? 'none';
+  }
 
   get size(): number {
     return this.chunks.length;
@@ -132,11 +140,9 @@ export class VaultIndex {
     return fused.map((index) => ({ ...this.chunks[index], score: cos.get(index) ?? dotF32(q, this.f32[index]) }));
   }
 
-  /** Graph-BFS citation chain (seed → wikilink + kNN). No LLM compose. */
-  async trace(question: string, opts: TraceOptions = {}): Promise<ReasonHop[]> {
-    if (this.chunks.length === 0) return [];
-    if (!this.flatInt8) this.build();
-    const facade: TraceFacade = {
+  // shared facade builder → trace() + reason() use the same view
+  private makeFacade(): TraceFacade {
+    return {
       chunks: this.chunks,
       f32: this.f32,
       noteLinks: this.noteLinks,
@@ -144,7 +150,28 @@ export class VaultIndex {
       chunkIdOf: (hit) =>
         this.chunks.findIndex((c) => c.notePath === hit.notePath && c.byteStart === hit.byteStart),
     };
-    return traceReasoning(facade, question, opts);
+  }
+
+  /** Graph-BFS citation chain (seed → wikilink + kNN). No LLM compose. */
+  async trace(question: string, opts: TraceOptions = {}): Promise<ReasonHop[]> {
+    if (this.chunks.length === 0) return [];
+    if (!this.flatInt8) this.build();
+    return traceReasoning(this.makeFacade(), question, opts);
+  }
+
+  /** Cited LLM answer over the trace chain. Throws when no ChatModel injected (config bug). */
+  async reason(
+    question: string,
+    opts: TraceOptions & ChatComposeOpts = {},
+  ): Promise<{ answer: string; hops: ReasonHop[] }> {
+    if (!this.chatModel) {
+      throw new Error(
+        'reason() requires a ChatModel — pass via new VaultIndex(embedder, vaultPath, chatModel)',
+      );
+    }
+    if (this.chunks.length === 0) return { answer: 'No relevant context found in vault.', hops: [] };
+    if (!this.flatInt8) this.build();
+    return composeAnswer(this.makeFacade(), this.chatModel, question, opts);
   }
 
   /** Git-history walker for `notePath` (POSIX-relative to vaultPath). [] when vaultPath unset. */

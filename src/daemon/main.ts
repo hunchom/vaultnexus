@@ -9,6 +9,7 @@ import { createMcpServer } from './mcp-server.js';
 import { SocketServerTransport } from './socket-transport.js';
 import { createHttpApp } from './http.js';
 import { selectEmbedder } from './select-embedder.js';
+import { selectChatModel } from './select-chat-model.js';
 import { VaultIndex } from './vault-index.js';
 import { indexVault } from './indexer.js';
 
@@ -34,8 +35,10 @@ async function main(): Promise<void> {
   if (existsSync(socketPath)) rmSync(socketPath);
 
   const embedder = await selectEmbedder();
+  const chatModel = selectChatModel(process.env);
+  process.stderr.write(`vaultnexus: chat model = ${chatModel.id}\n`);
   const vaultDir = process.env.VAULTNEXUS_VAULT;
-  const index = new VaultIndex(embedder, vaultDir);
+  const index = new VaultIndex(embedder, vaultDir, chatModel);
   if (vaultDir) {
     const n = await indexVault(vaultDir, index);
     process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);
