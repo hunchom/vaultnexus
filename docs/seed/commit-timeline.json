@@ -1,0 +1,124 @@
+[
+  {
+    "date": "2024-01-15T10:00:00Z",
+    "message": "seed: initial productivity notes",
+    "files": [
+      "notes/productivity/index.md",
+      "notes/productivity/gtd-overview.md",
+      "notes/productivity/deep-work-blocks.md"
+    ]
+  },
+  {
+    "date": "2024-02-04T10:00:00Z",
+    "message": "seed: initial decision-making notes",
+    "files": [
+      "notes/decisions/index.md",
+      "notes/decisions/intuition-vs-analysis.md",
+      "notes/decisions/ooda-loop-fast.md"
+    ]
+  },
+  {
+    "date": "2024-03-15T10:00:00Z",
+    "message": "first impressions of GTD",
+    "files": [
+      "notes/productivity/gtd-effectiveness.md"
+    ],
+    "stanceShift": {
+      "notes/productivity/gtd-effectiveness.md": ".history/gtd-effectiveness/r1.md"
+    }
+  },
+  {
+    "date": "2024-04-22T10:00:00Z",
+    "message": "seed: initial knowledge-tools notes",
+    "files": [
+      "notes/tools/index.md",
+      "notes/tools/atomic-notes-principle.md",
+      "notes/tools/zettelkasten-vs-folders.md"
+    ]
+  },
+  {
+    "date": "2024-05-10T10:00:00Z",
+    "message": "productivity: review protocols",
+    "files": [
+      "notes/productivity/weekly-review-protocol.md",
+      "notes/productivity/inbox-zero-strategy.md"
+    ]
+  },
+  {
+    "date": "2024-06-10T10:00:00Z",
+    "message": "GTD: weekly review pays off",
+    "files": [
+      "notes/productivity/gtd-effectiveness.md"
+    ],
+    "stanceShift": {
+      "notes/productivity/gtd-effectiveness.md": ".history/gtd-effectiveness/r2.md"
+    }
+  },
+  {
+    "date": "2024-07-03T10:00:00Z",
+    "message": "decision-making: bias countermeasures",
+    "files": [
+      "notes/decisions/premortem-checklist.md",
+      "notes/decisions/sunk-cost-trap.md"
+    ]
+  },
+  {
+    "date": "2024-08-14T10:00:00Z",
+    "message": "productivity: schedule structure",
+    "files": [
+      "notes/productivity/maker-vs-manager.md",
+      "notes/productivity/calendar-blocking.md",
+      "notes/productivity/context-switching-cost.md"
+    ]
+  },
+  {
+    "date": "2024-09-02T10:00:00Z",
+    "message": "productivity: quitting pomodoro",
+    "files": [
+      "notes/productivity/why-i-quit-pomodoro.md"
+    ]
+  },
+  {
+    "date": "2024-09-25T10:00:00Z",
+    "message": "tools: choosing obsidian",
+    "files": [
+      "notes/tools/why-obsidian.md",
+      "notes/tools/markdown-portability.md",
+      "notes/tools/wikilinks-vs-tags.md"
+    ]
+  },
+  {
+    "date": "2024-10-22T10:00:00Z",
+    "message": "GTD: the only viable system",
+    "files": [
+      "notes/productivity/gtd-effectiveness.md"
+    ]
+  },
+  {
+    "date": "2024-11-01T10:00:00Z",
+    "message": "decisions: marking 2027 forecasts",
+    "files": [
+      "notes/decisions/ai-capabilities-2027.md",
+      "notes/decisions/remote-work-future.md",
+      "notes/decisions/personal-blog-growth.md",
+      "notes/decisions/skill-acquisition-rate.md",
+      "notes/decisions/regret-minimization-frame.md"
+    ]
+  },
+  {
+    "date": "2024-11-18T10:00:00Z",
+    "message": "tools: density + retrieval",
+    "files": [
+      "notes/tools/spaced-repetition-utility.md",
+      "notes/tools/note-density-tradeoff.md",
+      "notes/tools/search-vs-browse.md"
+    ]
+  },
+  {
+    "date": "2024-12-20T10:00:00Z",
+    "message": "tools: starting the vaultnexus experiment",
+    "files": [
+      "notes/tools/this-vaultnexus-experiment.md"
+    ]
+  }
+]
