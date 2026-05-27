@@ -66,6 +66,34 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     );
 
     server.registerTool(
+      'vaultnexus_reason',
+      {
+        description:
+          'Cited natural-language answer over the vault. Composes via LLM on top of the citation chain (vaultnexus_trace). Every claim cites [ref:notePath:byteStart-byteEnd] from the chain; unsupported claims are dropped, never invented. Returns { answer, hops, model } — model id is reported for transparency.',
+        inputSchema: {
+          question: z.string(),
+          maxDepth: z.number().int().nonnegative().optional(),
+          kSeeds: z.number().int().positive().optional(),
+          knnPerHop: z.number().int().positive().optional(),
+          simThreshold: z.number().optional(),
+          maxHops: z.number().int().positive().optional(),
+          maxTokens: z.number().int().positive().optional(),
+          temperature: z.number().optional(),
+        },
+      },
+      async ({ question, maxDepth, kSeeds, knnPerHop, simThreshold, maxHops, maxTokens, temperature }) => {
+        const result = await index.reason(question, {
+          maxDepth, kSeeds, knnPerHop, simThreshold, maxHops, maxTokens, temperature,
+        });
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify({ ...result, model: index.chatModelId() }) },
+          ],
+        };
+      },
+    );
+
+    server.registerTool(
       'vaultnexus_trace',
       {
         description:
