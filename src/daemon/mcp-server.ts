@@ -94,6 +94,32 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     );
 
     server.registerTool(
+      'vaultnexus_recall_history',
+      {
+        description:
+          'Cited natural-language narration of how a single note\'s stance shifted across its git timeline. Walks vaultnexus_history under the hood, then composes via LLM. Every cited revision is a real git SHA from the timeline ([sha:<7> @ <YYYY-MM-DD>]); the prompt forbids fabricated SHAs. Returns { narration, revisions, model } — model id reported for transparency. < 2 revisions → fallback narration, no LLM call.',
+        inputSchema: {
+          notePath: z.string(),
+          since: z.string().optional(),
+          until: z.string().optional(),
+          maxRevisions: z.number().int().positive().optional(),
+          maxTokens: z.number().int().positive().optional(),
+          temperature: z.number().optional(),
+        },
+      },
+      async ({ notePath, since, until, maxRevisions, maxTokens, temperature }) => {
+        const result = await index.narrateHistory(notePath, {
+          since, until, maxRevisions, maxTokens, temperature,
+        });
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify({ ...result, model: index.chatModelId() }) },
+          ],
+        };
+      },
+    );
+
+    server.registerTool(
       'vaultnexus_trace',
       {
         description:
