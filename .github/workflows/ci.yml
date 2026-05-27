@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: build + test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: setup node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm run typecheck
+
+      - name: build
+        run: pnpm run build
+
+      - name: test
+        run: pnpm test --reporter=dot
+
+      - name: build obsidian plugin
+        working-directory: obsidian-plugin
+        run: node esbuild.config.mjs
+
+  lint-md:
+    name: docs link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify README + GETTING_STARTED exist
+        run: |
+          test -f README.md
+          test -f LICENSE
+          test -f docs/GETTING_STARTED.md
+          # No Co-Authored attribution leaks anywhere
+          ! grep -rEn 'Co-Authored-By|noreply@anthropic\.com|🤖 Generated' \
+            --include='*.md' --include='*.ts' --include='*.json' --include='*.yml' . \
+            | grep -v 'docs/specs/plans/' \
+            | grep -v 'CI ignores plans/' || true

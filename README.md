@@ -27,6 +27,12 @@ Semantic search, citation-grade retrieval, cross-community bridges.
 Talks to Claude Code, Claude Desktop, and an Obsidian sidebar — over loopback HTTP.
 No cloud round-trip on query.
 
+[![CI](https://github.com/hunchom/vaultnexus/actions/workflows/ci.yml/badge.svg)](https://github.com/hunchom/vaultnexus/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)
+[![Obsidian plugin](https://img.shields.io/badge/Obsidian-plugin-7c3aed?logo=obsidian)](https://obsidian.md/)
+
 [Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](#architecture) · [MCP tools](#mcp-tools) · [Configuration](#configuration)
 
 </div>
@@ -54,7 +60,7 @@ No cloud round-trip on query.
 ### 1. Build the daemon
 
 ```bash
-git clone https://github.com/<your-fork>/vaultnexus.git
+git clone https://github.com/hunchom/vaultnexus.git
 cd vaultnexus
 pnpm install
 pnpm run build
