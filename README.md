@@ -1,76 +1,246 @@
-# VaultNexus
+<div align="center">
 
-Local-first knowledge engine for an Obsidian/Markdown vault, exposed to Claude Code over MCP. Best-engineered hybrid retrieval plus cross-community convergence ("notes that secretly agree across your link silos"), run entirely on your machine. See `docs/specs/2026-05-23-vaultnexus-concept.md` for the design and `docs/specs/plans/` for the build plans.
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║   ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗               ║
+║   ██║   ██║██╔══██╗██║   ██║██║  ╚══██╔══╝               ║
+║   ██║   ██║███████║██║   ██║██║     ██║                  ║
+║   ╚██╗ ██╔╝██╔══██║██║   ██║██║     ██║                  ║
+║    ╚████╔╝ ██║  ██║╚██████╔╝███████╗██║                  ║
+║     ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝                  ║
+║      ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗         ║
+║      ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝         ║
+║      ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗         ║
+║      ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║         ║
+║      ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║         ║
+║      ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝         ║
+║                                                          ║
+║     local-first semantic search over your Obsidian vault ║
+║          cited retrieval · cross-cluster bridges         ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
 
-## Status
+**A local knowledge engine for Markdown vaults.**
+Semantic search, citation-grade retrieval, cross-community bridges.
+Talks to Claude Code, Claude Desktop, and an Obsidian sidebar — over loopback HTTP.
+No cloud round-trip on query.
 
-Working end-to-end (Plans 01–11):
+[Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](#architecture) · [MCP tools](#mcp-tools) · [Configuration](#configuration)
 
-- **Hybrid retrieval** — dense vector (int8 SIMD coarse + exact f32 rescore) ⊕ FTS5 keyword (bm25), fused with Reciprocal Rank Fusion. Offset-faithful Markdown chunking with cited byte ranges.
-- **Cross-community bridges** — wikilink graph → Louvain communities → surfaces semantically similar chunks that live in *different* link-clusters and were never linked.
-- **Persistent embedding cache** — content-hash → vector store (model-scoped); restarts reuse embeddings instead of re-calling a paid embedder.
-- **Provider-agnostic embedder** — deterministic offline `FakeEmbedder` for tests; any OpenAI-compatible `/embeddings` endpoint (Voyage, OpenAI, local) for real use.
-- **Validated** — on a clean paraphrase gold set (queries share no distinctive token with their target note), `voyage-3-large` reaches recall@1 0.958 / MRR 1.000 versus a lexical baseline at 0.500 / 0.600. See `docs/specs/plans/2026-05-23-vaultnexus-09-eval-harness.md`.
+</div>
 
-## Develop
+---
 
-Targets **Node 22**. With nvm-style setups where the default `node` is older, prepend a Node 22 install to `PATH` (e.g. `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`).
+## What you get
+
+| | |
+|---|---|
+| **Hybrid retrieval** | int8 SIMD coarse + exact f32 rescore (dense) fused with FTS5 BM25 (lexical) via Reciprocal Rank Fusion. Offset-faithful chunking → every hit is a verbatim byte range you can re-open in the editor. |
+| **Cross-community bridges** | Wikilink graph → Louvain communities → surfaces semantically aligned chunks that live in *different* link clusters and were never linked. The "notes that secretly agree across your silos" problem, solved. |
+| **Lives on loopback** | A single daemon binds `127.0.0.1`. Plugins, MCP clients, and shell tools all hit the same HTTP + Unix-socket surface. Nothing is exposed beyond your machine. |
+| **Provider-agnostic** | Any OpenAI-compatible embeddings endpoint (Voyage, OpenAI, local Ollama, vLLM). Chat model is optional and configurable live from the Obsidian plugin — no daemon restart. |
+| **Content-hash caching** | Re-embedding skipped when chunks unchanged. Restart cost is milliseconds, not minutes. |
+| **Snapshot persistence** | Vectors + chunks persist to an on-disk SQLite snapshot. The daemon survives reboots without re-embedding the vault. |
+| **Validated** | On a paraphrase gold set where queries share no distinctive token with their target, `voyage-3-large` hits recall@1 = 0.958 / MRR = 1.000. Lexical baseline: 0.500 / 0.600. |
+
+---
+
+## Install
+
+> **Requirements** — Node 22+, an Obsidian vault, and (optionally) an OpenAI-compatible embeddings endpoint + key. The bundled `FakeEmbedder` works offline for smoke tests.
+
+### 1. Build the daemon
 
 ```bash
+git clone https://github.com/<your-fork>/vaultnexus.git
+cd vaultnexus
 pnpm install
-pnpm test          # unit + integration + e2e (one gated test skips without a real embedder)
-pnpm typecheck     # tsc, no emit (type-checks src + test)
-pnpm build         # tsc -> dist/
+pnpm run build
 ```
 
-## Run
-
-Start the daemon (single instance per machine). Point it at a vault and, for real semantics, an embedding endpoint:
+### 2. Start it (one-liner)
 
 ```bash
-export VAULTNEXUS_VAULT=/path/to/your/vault          # indexed on startup
-export VAULTNEXUS_EMBED_URL=https://api.voyageai.com/v1
-export VAULTNEXUS_EMBED_KEY=...                       # never commit this
-export VAULTNEXUS_EMBED_MODEL=voyage-3-large          # best for prose
-pnpm dev:daemon                                       # or, after build: node dist/daemon/main.js
+VAULTNEXUS_VAULT="$HOME/path/to/your/vault" \
+VAULTNEXUS_EMBED_URL="https://api.voyageai.com/v1" \
+VAULTNEXUS_EMBED_KEY="$VOYAGE_API_KEY" \
+VAULTNEXUS_EMBED_MODEL="voyage-3-large" \
+  node dist/daemon/main.js
 ```
 
-Without `VAULTNEXUS_EMBED_*`, the daemon uses the offline `FakeEmbedder` (non-semantic — fine for wiring tests, not for real retrieval). Without `VAULTNEXUS_VAULT`, only `vaultnexus_ping` is served.
+Health check:
 
-Register the bridge with Claude Code as an MCP server:
+```bash
+curl http://127.0.0.1:38473/status
+# → {"status":"ok","version":"0.0.1","indexed":N,...}
+```
+
+### 3. Pick your client
+
+<table>
+<tr>
+<td valign="top" width="33%">
+
+#### Obsidian plugin
+
+```bash
+mkdir -p \
+  "$VAULT/.obsidian/plugins/vaultnexus"
+cp obsidian-plugin/main.js \
+   obsidian-plugin/manifest.json \
+  "$VAULT/.obsidian/plugins/vaultnexus/"
+```
+
+Open Obsidian → **Settings → Community plugins** → enable **VaultNexus**.
+
+</td>
+<td valign="top" width="33%">
+
+#### Claude Code (MCP)
+
+```bash
+claude mcp add vaultnexus \
+  /opt/homebrew/opt/node@22/bin/node \
+  $(pwd)/dist/bridge/main.js
+```
+
+Restart Claude Code. The 8 `vaultnexus_*` tools appear in `tools/list`.
+
+</td>
+<td valign="top" width="34%">
+
+#### Claude Desktop (MCP)
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "vaultnexus": { "command": "node", "args": ["dist/bridge/main.js"] }
+    "vaultnexus": {
+      "command": "node",
+      "args": ["/abs/path/to/dist/bridge/main.js"]
+    }
   }
 }
 ```
 
-### Environment
+</td>
+</tr>
+</table>
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `VAULTNEXUS_VAULT` | Markdown vault directory to index | none (ping-only) |
-| `VAULTNEXUS_EMBED_URL` / `_KEY` / `_MODEL` | OpenAI-compatible embedder | offline `FakeEmbedder` |
-| `VAULTNEXUS_CACHE` | Embedding cache DB path; `off` disables | `~/.vaultnexus/embeddings.db` |
-| `VAULTNEXUS_SOCKET` / `VAULTNEXUS_LOCK` / `VAULTNEXUS_HTTP_PORT` | transport overrides | tmpdir / tmpdir / 38473 |
+A full step-by-step is in **[Getting started →](docs/GETTING_STARTED.md)**.
+
+---
 
 ## MCP tools
 
-- `vaultnexus_ping` — health and version probe.
-- `vaultnexus_search` — hybrid search; returns cited block hits (`notePath`, `headingPath`, byte offsets, `score`). Params: `query`, `k?`.
-- `vaultnexus_bridges` — cross-note semantically-similar chunk pairs, each tagged `crossCommunity` (different link-clusters) and `linked` (already wikilinked). Params: `topN?`, `minSimilarity?`, `crossCommunityOnly?`. Suggestions, not assertions.
+Every tool returns a JSON payload. Every payload includes citations: `notePath`, `headingPath`, `byteStart`, `byteEnd`.
 
-## Eval
+| Tool | Purpose |
+|---|---|
+| `vaultnexus_ping` | Health probe. Returns `{status, version}`. |
+| `vaultnexus_search` | Hybrid semantic + keyword search. Returns ranked cited chunks. |
+| `vaultnexus_bridges` | Cross-community bridge pairs from the wikilink graph. |
+| `vaultnexus_trace` | Multi-hop reasoning chain over the retrieval graph. |
+| `vaultnexus_reason` | Composed answer with inline citations (requires chat model). |
+| `vaultnexus_history` | Git revisions for a note (vault must be a git repo). |
+| `vaultnexus_recall_history` | Time-ordered narration of a note's evolution. |
+| `vaultnexus_forecasts` | Mined `[forecast: ... by YYYY-MM-DD]` ledger entries from the vault. |
 
-```bash
-pnpm eval                                              # FakeEmbedder baseline
-VAULTNEXUS_EMBED_URL=... VAULTNEXUS_EMBED_KEY=... VAULTNEXUS_EMBED_MODEL=voyage-3-large pnpm eval
-```
-
-Prints recall@1 / recall@3 / recall@10 / nDCG@10 / MRR over a paraphrase gold set (`eval/corpus/` + `src/eval/gold.ts`). recall@1 and MRR are the load-bearing metrics; recall@10 saturates on the small corpus.
+---
 
 ## Architecture
 
-A single long-running daemon owns all state and is the single writer. It listens on a Unix domain socket (the Claude Code path) and loopback HTTP on `127.0.0.1` (the future Obsidian-plugin path). Claude Code speaks MCP over stdio to a thin bridge that shuttles raw bytes between its stdio and the daemon's socket; the daemon wraps each connection in an MCP transport and serves it. `core/` is pure and I/O-free (chunking, quantization, int8 search, fusion, metrics); the daemon injects all I/O (embedder, FTS, cache, graph). Embeddings are L2-normalized so cosine equals dot product; int8 uses a symmetric single-scale quantization that composes with the integer dot kernel, with exact f32 rescore for the final ranking.
+```
+   ┌──────────────────┐      ┌──────────────────────────────┐
+   │  Obsidian plugin │──────│   loopback HTTP :38473       │
+   └──────────────────┘      │   ┌──────────────────────┐   │
+   ┌──────────────────┐      │   │      daemon          │   │
+   │  Claude Code     │──┐   │   │  ┌────────────────┐  │   │
+   └──────────────────┘  │   │   │  │  vault index   │  │   │
+   ┌──────────────────┐  │   │   │  │  (in-memory)   │  │   │
+   │  Claude Desktop  │──┴───│   │  └───────┬────────┘  │   │
+   └──────────────────┘      │   │          │           │   │
+                             │   │  ┌───────▼────────┐  │   │
+                             │   │  │ SQLite snapshot│  │   │
+                             │   │  │  ~/.vaultnexus │  │   │
+                             │   │  └────────────────┘  │   │
+   ┌──────────────────┐      │   │                      │   │
+   │  stdio bridge    │──────┘   │  ┌────────────────┐  │   │
+   │  (Unix socket)   │          │  │  embedder      │  │   │
+   └──────────────────┘          │  │  (HTTP API)    │  │   │
+                                 │  └───────┬────────┘  │   │
+                                 │          │           │   │
+                                 │  ┌───────▼────────┐  │   │
+                                 │  │  chat model    │  │   │
+                                 │  │  (hot-swap)    │  │   │
+                                 │  └────────────────┘  │   │
+                                 └──────────────────────┘
+```
+
+One daemon. Three surfaces (HTTP for the plugin, Unix socket for stdio MCP clients, stdio bridge for the same). Everything else is config.
+
+---
+
+## Configuration
+
+All knobs are environment variables on the daemon (the plugin reads `host`/`port` from its own settings). Chat-side config can also be pushed live from the Obsidian plugin via `POST /configure-chat` — no restart.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VAULTNEXUS_VAULT` | — | Absolute path to the vault directory. Required. |
+| `VAULTNEXUS_HTTP_PORT` | `38473` | Loopback port the daemon binds. |
+| `VAULTNEXUS_EMBED_URL` | unset | OpenAI-compatible embeddings endpoint. Unset → offline `FakeEmbedder`. |
+| `VAULTNEXUS_EMBED_KEY` | unset | API key for the embedder. |
+| `VAULTNEXUS_EMBED_MODEL` | unset | Embedding model id (e.g. `voyage-3-large`, `nomic-embed-text-v1.5`). |
+| `VAULTNEXUS_INDEX_SNAPSHOT` | `~/.vaultnexus/index-snapshot.db` | On-disk snapshot path. `off` disables. |
+| `VAULTNEXUS_CHAT_PROVIDER` | `fake` | `anthropic` · `openai` · `openai-compatible` · `fake`. |
+| `VAULTNEXUS_CHAT_KEY` | unset | Chat-provider API key. Required for non-fake. |
+| `VAULTNEXUS_CHAT_MODEL` | provider default | Defaults: anthropic → `claude-sonnet-4-6`, openai → `gpt-4o-mini`. |
+| `VAULTNEXUS_CHAT_URL` | unset | Base URL for openai-compatible (Ollama, LM Studio, vLLM). |
+
+---
+
+## Develop
+
+Targets **Node 22**. If the system `node` is older, prepend a Node 22 install to `PATH`:
+
+```bash
+export PATH=/opt/homebrew/opt/node@22/bin:$PATH
+
+pnpm install
+pnpm run build       # daemon + bridge → dist/
+pnpm test            # 449 tests
+```
+
+The Obsidian plugin builds independently:
+
+```bash
+cd obsidian-plugin
+node esbuild.config.mjs           # → main.js
+node esbuild.config.mjs --watch   # dev mode
+```
+
+---
+
+## Repo layout
+
+```
+src/
+  core/          embedding-agnostic primitives (chunker, vectors, search, fusion)
+  daemon/        HTTP + MCP server, vault index, snapshot, hot-swap chat
+  bridge/        stdio ↔ unix-socket pipe for MCP clients
+obsidian-plugin/
+  src/           plugin entry, sidebar search view, settings tab
+  main.js        bundled artifact (esbuild)
+test/            449 vitest cases (chunker, retrieval, MCP, HTTP, snapshot, integration)
+docs/specs/      design docs + per-plan implementation notes
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

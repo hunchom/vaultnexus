@@ -44,6 +44,8 @@ export function chunkDocument(source: string, opts: ChunkOptions = {}): Chunk[] 
       flush();
       const depth = (node as Heading).depth;
       path.length = Math.max(0, depth - 1);
+      // Fill missing ancestor slots → no undefined leaks into JSON as null.
+      for (let i = 0; i < depth - 1; i += 1) if (path[i] === undefined) path[i] = '';
       path[depth - 1] = headingText(node as Heading);
       continue;
     }

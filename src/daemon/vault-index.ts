@@ -17,6 +17,11 @@ import { narrateRecallHistory, type NarrateOptions } from './recall-narrate.js';
 import { scanVaultForecasts, type ForecastLedger } from './forecast-scan.js';
 import type { IndexSnapshot, SnapshotChunk } from './index-snapshot.js';
 
+// Defensive: legacy snapshots + skip-level headings can leak nulls/undefined → coerce.
+function normalizeHeadingPath(p: ReadonlyArray<string | null | undefined>): string[] {
+  return p.map((s) => (typeof s === 'string' ? s : ''));
+}
+
 export interface IndexedChunk {
   notePath: string;
   headingPath: string[];
@@ -103,12 +108,13 @@ export class VaultIndex {
     const unitVecs = vecs.map((v) => l2normalize(v));
     const snapChunks: SnapshotChunk[] = [];
     blocks.forEach((b, i) => {
+      const headingPath = normalizeHeadingPath(b.headingPath);
       const id = this.chunks.length;
-      this.chunks.push({ notePath, headingPath: b.headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd });
+      this.chunks.push({ notePath, headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd });
       this.f32.push(unitVecs[i]);
       this.fts.add(id, b.text);
       snapChunks.push({
-        headingPath: b.headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd, vec: unitVecs[i],
+        headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd, vec: unitVecs[i],
       });
     });
     this.dims = this.f32[0].length;
@@ -124,8 +130,9 @@ export class VaultIndex {
     if (chunks.length === 0) return;
     this.noteLinks.set(notePath, extractWikilinks(source));
     chunks.forEach((c) => {
+      const headingPath = normalizeHeadingPath(c.headingPath);
       const id = this.chunks.length;
-      this.chunks.push({ notePath, headingPath: c.headingPath, text: c.text, byteStart: c.byteStart, byteEnd: c.byteEnd });
+      this.chunks.push({ notePath, headingPath, text: c.text, byteStart: c.byteStart, byteEnd: c.byteEnd });
       this.f32.push(c.vec);
       this.fts.add(id, c.text);
     });
