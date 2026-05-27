@@ -10,6 +10,7 @@ import { createMcpServer } from '../../src/daemon/mcp-server.js';
 import { VaultIndex } from '../../src/daemon/vault-index.js';
 import { FakeEmbedder } from '../../src/core/embedder.js';
 import { FakeChatModel } from '../../src/core/fake-chat-model.js';
+import type { ChatModel } from '../../src/core/chat-model.js';
 import { seedDemoVault } from '../../scripts/seed-demo-vault.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -28,8 +29,8 @@ function listVaultNotes(vaultPath: string): string[] {
   return out.split('\n').filter((l) => l.endsWith('.md'));
 }
 
-async function buildSeededIndex(vaultPath: string): Promise<VaultIndex> {
-  const idx = new VaultIndex(new FakeEmbedder(64), vaultPath, new FakeChatModel());
+async function buildSeededIndex(vaultPath: string, chat: ChatModel = new FakeChatModel()): Promise<VaultIndex> {
+  const idx = new VaultIndex(new FakeEmbedder(64), vaultPath, chat);
   for (const rel of listVaultNotes(vaultPath)) {
     const abs = join(vaultPath, rel);
     if (existsSync(abs)) await idx.addNote(rel, readFileSync(abs, 'utf8'));
@@ -90,6 +91,35 @@ describe('vaultnexus_recall_history MCP tool', () => {
     expect(parsed.model).toBe('fake');
     expect(parsed.revisions.length).toBe(1);
     expect(parsed.narration.startsWith('Note has fewer than two')).toBe(true);
+    expect(parsed.invalidShaCitations).toEqual([]);
+    await client.close();
+  });
+
+  it('roundtrip surfaces invalidShaCitations from a fabricated SHA', async () => {
+    // pull a real sha so the inline model can mix one real prefix w/ one fabricated
+    const realShas = execFileSync(
+      'git',
+      ['-C', vaultPath, 'log', '--follow', '--pretty=format:%H', '--', 'notes/productivity/gtd-effectiveness.md'],
+      { encoding: 'utf8' },
+    ).trim().split('\n');
+    const realShort = realShas[0].slice(0, 7);
+    const inline: ChatModel = {
+      id: 'inline',
+      async compose() {
+        return `Started [sha:${realShort} @ 2024-03-15] then [sha:badbeef @ 2024-10-22]`;
+      },
+    };
+    const idx = await buildSeededIndex(vaultPath, inline);
+    const client = await connect(createMcpServer({ index: idx }));
+    const res = await client.callTool({
+      name: 'vaultnexus_recall_history',
+      arguments: { notePath: 'notes/productivity/gtd-effectiveness.md' },
+    });
+    const parsed = JSON.parse((res.content as Array<{ type: string; text: string }>)[0].text);
+    expect(parsed.model).toBe('inline');
+    expect(parsed.invalidShaCitations).toEqual(['[sha:badbeef @ 2024-10-22]']);
+    // narration text untouched → honest-surface contract
+    expect(parsed.narration).toContain('[sha:badbeef @ 2024-10-22]');
     await client.close();
   });
 });
