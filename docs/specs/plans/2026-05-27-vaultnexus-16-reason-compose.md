@@ -299,7 +299,7 @@
 - [ ] `pnpm build` — clean.
 - [ ] **New deps added:** `ai`, `@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/openai-compatible`. Each is justified in the spec.
 - [ ] Caveman-ULTRA on code comments. Spec docs are normal prose. Prompt templates inside source are normal prose (the LLM reads them).
-- [ ] All commits authored as `Roger French <merihmengisteab@gmail.com>`.
+- [ ] All commits authored as `dev <dev@localhost>`.
 - [ ] No `Claude` / `Anthropic` / `Co-Authored-By` / `noreply@anthropic` strings in commit messages or non-code files. **Exception:** the `@ai-sdk/anthropic` package name appears in `package.json` — that is a legitimate dep name and is REQUIRED here. The attribution rule is about authorship, not about referencing the company in dep manifests. (Same as how `node` ships with code that says "Node.js" — package names are mechanical, not attribution.)
 - [ ] **Do NOT rewrite history.** **Do NOT `git add -A`.**
 

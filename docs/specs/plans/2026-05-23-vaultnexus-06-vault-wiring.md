@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 06 of the sequence. Delivers real-vault end-to-end vector retrieval. NOT: on-disk persistence/mmap (re-index on startup for now), FTS5 keyword + fusion, two-lane router/diversity, file-watching/incremental reindex, background indexing (index synchronously before readiness — fine for MLP-scale vaults). Builds on master (Plans 01–05).
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/vault-wiring` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/vault-wiring` off master.
 
 ---
 

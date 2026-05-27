@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 03 of the sequence (concept §3). Delivers ONLY the in-memory search math + calibration. No embeddings (Plan 04), no mmap/LMDB/FTS5 persistence (Plan 05), no fusion/lookup pipeline (Plan 06). Builds on master (Plans 01–02).
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative type-check `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/search-engine` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative type-check `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/search-engine` off master.
 
 ---
 

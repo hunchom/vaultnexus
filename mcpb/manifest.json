@@ -6,8 +6,8 @@
   "description": "Local-first Obsidian knowledge engine over MCP",
   "long_description": "VaultNexus indexes an Obsidian/Markdown vault into a hybrid retrieval graph (exact + semantic + wikilink) and exposes it to Claude via MCP. Runs entirely on your machine; the LLM reasoning lane optionally cites real notes back to you.",
   "author": {
-    "name": "Roger French",
-    "email": "merihmengisteab@gmail.com"
+    "name": "dev",
+    "email": "dev@localhost"
   },
   "license": "MIT",
   "keywords": ["obsidian", "markdown", "knowledge", "rag", "mcp", "local-first"],

@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 05 of the sequence. Delivers in-memory index + the search tool. NOT: vault-directory walk, daemon wiring/config, on-disk persistence (mmap), FTS5 keyword, fusion, read-time liveness (Plan 06). Vectors are L2-normalized in the index so cosine==dot regardless of provider.
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/vault-index` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/vault-index` off master.
 
 ---
 

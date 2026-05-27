@@ -205,7 +205,7 @@ server.registerTool(
 - [ ] No new deps added.
 - [ ] Caveman-ULTRA on all source comments/docstrings written. No "Fix N:" prefaces, no essay blocks. ONE-line comments. Quoted strings + symbol names verbatim.
 - [ ] No `Claude` / `Anthropic` / `Co-Authored-By` / `noreply@anthropic` strings in any new or modified file.
-- [ ] Each task committed atomically on `feat/reason-over-vault` w/ author `Roger French <merihmengisteab@gmail.com>`.
+- [ ] Each task committed atomically on `feat/reason-over-vault` w/ author `dev <dev@localhost>`.
 
 ---
 

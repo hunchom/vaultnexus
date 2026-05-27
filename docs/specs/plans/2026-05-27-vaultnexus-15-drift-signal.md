@@ -211,7 +211,7 @@ main().catch((e) => { console.error(e); process.exit(1); });
 - [ ] **Step 2:** `pnpm test` — all green.
 - [ ] **Step 3:** `pnpm build` — clean.
 - [ ] **Step 4:** Manual sanity: `pnpm seed:demo /tmp/vn-drift-$RANDOM && pnpm drift notes/productivity/gtd-effectiveness.md /tmp/vn-drift-...` should print a JSON line with `flag.reason === 'conviction-up-supporting-flat'`.
-- [ ] **Step 5:** Confirm author identity (`git log master..HEAD --pretty='%h %an <%ae>'` all `Roger French`) and `.claude/` exclusion (`git log master..HEAD --stat | grep '.claude/'` empty).
+- [ ] **Step 5:** Confirm author identity (`git log master..HEAD --pretty='%h %an <%ae>'` all `dev`) and `.claude/` exclusion (`git log master..HEAD --stat | grep '.claude/'` empty).
 
 ---
 
@@ -224,7 +224,7 @@ main().catch((e) => { console.error(e); process.exit(1); });
 - [ ] No MCP tool registered for drift — research surface only until §10.9 spike passes.
 - [ ] Lexicon doc committed at `docs/specs/drift-lexicon.md` as the pre-registered v1 artifact.
 - [ ] Caveman-ULTRA on code comments.
-- [ ] All commits authored as `Roger French <merihmengisteab@gmail.com>`.
+- [ ] All commits authored as `dev <dev@localhost>`.
 - [ ] **Do NOT rewrite history.** **Do NOT `git add -A`.**
 
 ---

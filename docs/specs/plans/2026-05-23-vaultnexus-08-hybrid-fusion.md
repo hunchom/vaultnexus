@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 08. Delivers FTS5 + RRF hybrid search. NOT: on-disk persistence (FTS still `:memory:`, rebuilt on startup), CC/TMM learned fusion (RRF is the cold-start; learned weights need eval labels → later), query-time field boosting. Builds on master (Plans 01–07).
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/hybrid-fusion` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/hybrid-fusion` off master.
 
 ---
 

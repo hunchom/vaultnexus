@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 07. Delivers convergence v1 + demo vault. Convergence v1 = cross-note high-similarity pairs (FP-safe). DEFERRED (noted, needs wikilink extraction + Louvain — a later plan): excluding already-wikilinked pairs, cross-community ranking, Bayesian-surprise weighting, the §10.6 owner-rated insight bar. Also deferred: eval harness (most meaningful with a real embedder — Plan 08). Builds on master (Plans 01–06).
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/bridges-demo` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/bridges-demo` off master.
 
 ---
 

@@ -10,7 +10,7 @@
 
 **Scope note:** Plan 04 of the sequence (concept §5, embed role only). Delivers the embed abstraction + fake + one real provider + probe. NOT: reranker/judge roles, the vault-grounded micro-benchmark router, the full registry selection UX (a thin factory only), persistence. Builds on master (Plans 01–03; reuses `core/vectors.ts` `l2normalize`).
 
-**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits Roger French, no AI attribution. Branch `feat/embedder` off master.
+**TOOLCHAIN:** every command under `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`. Authoritative `pnpm typecheck`. Commits dev, no AI attribution. Branch `feat/embedder` off master.
 
 ---
 

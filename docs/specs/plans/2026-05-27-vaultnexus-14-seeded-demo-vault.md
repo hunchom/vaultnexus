@@ -209,7 +209,7 @@ The builder hand-authors all notes + the timeline JSON. Date values must be vali
 - [ ] **Step 2:** Run `pnpm test` — all green; total test count ≥ 150 + ~5 new = ~155.
 - [ ] **Step 3:** Run `pnpm build` — clean.
 - [ ] **Step 4:** Confirm `demo-vault-seeded/` is committed (`git ls-files demo-vault-seeded | wc -l` ≈ 30) and `scripts/seed-demo-vault.ts` is committed.
-- [ ] **Step 5:** Confirm `git log master..HEAD --pretty='%h %an <%ae>'` shows every commit authored as `Roger French <merihmengisteab@gmail.com>`. No `hunchom`, no `Claude`, no other identities.
+- [ ] **Step 5:** Confirm `git log master..HEAD --pretty='%h %an <%ae>'` shows every commit authored as `dev <dev@localhost>`. No `dev`, no `Claude`, no other identities.
 - [ ] **Step 6:** Confirm `git log master..HEAD --stat | grep '.claude/'` is empty.
 
 ---
@@ -222,7 +222,7 @@ The builder hand-authors all notes + the timeline JSON. Date values must be vali
 - [ ] **No new deps added.** `child_process` is stdlib.
 - [ ] Caveman-ULTRA on code comments. Demo-vault content is **realistic English prose**, not caveman.
 - [ ] No `Claude` / `Anthropic` / `Co-Authored-By` / `noreply@anthropic` strings in any new or modified file (the spec doc itself has its rule-checklist line — that's fine).
-- [ ] Each task committed atomically on `feat/seeded-demo-vault` w/ author `Roger French <merihmengisteab@gmail.com>`.
+- [ ] Each task committed atomically on `feat/seeded-demo-vault` w/ author `dev <dev@localhost>`.
 - [ ] **Do NOT rewrite history (no rebase / amend / reset-author).** **Do NOT `git add -A`** — use `git add <specific-paths>` for every commit.
 
 ---
