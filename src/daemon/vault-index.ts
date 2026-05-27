@@ -163,13 +163,14 @@ export class VaultIndex {
   async reason(
     question: string,
     opts: TraceOptions & ChatComposeOpts = {},
-  ): Promise<{ answer: string; hops: ReasonHop[] }> {
+  ): Promise<{ answer: string; hops: ReasonHop[]; invalidCitations: string[] }> {
     if (!this.chatModel) {
       throw new Error(
         'reason() requires a ChatModel — pass via new VaultIndex(embedder, vaultPath, chatModel)',
       );
     }
-    if (this.chunks.length === 0) return { answer: 'No relevant context found in vault.', hops: [] };
+    if (this.chunks.length === 0)
+      return { answer: 'No relevant context found in vault.', hops: [], invalidCitations: [] };
     if (!this.flatInt8) this.build();
     return composeAnswer(this.makeFacade(), this.chatModel, question, opts);
   }

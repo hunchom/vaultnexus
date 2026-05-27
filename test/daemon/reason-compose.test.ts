@@ -75,6 +75,59 @@ describe('composeAnswer (orchestrator)', () => {
   });
 });
 
+describe('composeAnswer — invalidCitations (Plan 18)', () => {
+  it('mixed valid + fabricated citations → invalidCitations has only fabricated', async () => {
+    const idx = await seededIndex();
+    const facade = await facadeOver(idx);
+
+    // grab one real hop first → use its triple in the "valid" citation
+    const realHops = await (async () => {
+      const probe: ChatModel = { id: 'probe', async compose() { return ''; } };
+      return (await composeAnswer(facade, probe, 'GTD', { maxDepth: 0 })).hops;
+    })();
+    expect(realHops.length).toBeGreaterThan(0);
+    const real = realHops[0].chunk;
+    const goodRef = `[ref:${real.notePath}:${real.byteStart}-${real.byteEnd}]`;
+    const badRef = '[ref:nonexistent.md:99-100]';
+
+    const chat: ChatModel = {
+      id: 'fixed',
+      async compose() {
+        return `answer mentions ${goodRef} and also ${badRef}.`;
+      },
+    };
+    const res = await composeAnswer(facade, chat, 'GTD', { maxDepth: 0 });
+    expect(res.invalidCitations).toEqual([badRef]);
+  });
+
+  it('all-valid → invalidCitations is empty', async () => {
+    const idx = await seededIndex();
+    const facade = await facadeOver(idx);
+    const realHops = await (async () => {
+      const probe: ChatModel = { id: 'probe', async compose() { return ''; } };
+      return (await composeAnswer(facade, probe, 'GTD', { maxDepth: 0 })).hops;
+    })();
+    const real = realHops[0].chunk;
+    const goodRef = `[ref:${real.notePath}:${real.byteStart}-${real.byteEnd}]`;
+
+    const chat: ChatModel = {
+      id: 'fixed',
+      async compose() { return `everything cites ${goodRef} only.`; },
+    };
+    const res = await composeAnswer(facade, chat, 'GTD', { maxDepth: 0 });
+    expect(res.invalidCitations).toEqual([]);
+  });
+
+  it('zero hops → invalidCitations is empty', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(32));
+    const facade = await facadeOver(idx);
+    const res = await composeAnswer(facade, new FakeChatModel(), 'anything');
+    expect(res.answer).toBe('No relevant context found in vault.');
+    expect(res.hops).toEqual([]);
+    expect(res.invalidCitations).toEqual([]);
+  });
+});
+
 describe('VaultIndex.reason', () => {
   it('throws when no ChatModel injected', async () => {
     const idx = new VaultIndex(new FakeEmbedder(32));
