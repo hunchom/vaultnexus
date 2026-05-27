@@ -12,6 +12,7 @@ import { noteRevisions, type HistoryOptions, type Revision } from './git-history
 import type { ChatModel, ChatComposeOpts } from '../core/chat-model.js';
 import { composeAnswer } from './reason-compose.js';
 import { narrateRecallHistory, type NarrateOptions } from './recall-narrate.js';
+import { scanVaultForecasts, type ForecastLedger } from './forecast-scan.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -200,6 +201,16 @@ export class VaultIndex {
       };
     }
     return narrateRecallHistory(this.vaultPath, this.chatModel, notePath, opts);
+  }
+
+  /** Walk vault frontmatter → { pending, resolved, brier }. Throws when vaultPath unset. */
+  async forecasts(): Promise<ForecastLedger> {
+    if (!this.vaultPath) {
+      throw new Error(
+        'forecasts() requires a vaultPath — pass via new VaultIndex(embedder, vaultPath, ...)',
+      );
+    }
+    return scanVaultForecasts(this.vaultPath);
   }
 
   /** Release native FTS db handle. */
