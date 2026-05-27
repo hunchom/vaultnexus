@@ -21,6 +21,21 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
   const app = new Hono();
   app.get('/health', (c) => c.json(health()));
 
+  // GET /status → richer diagnostic (index size, chat-model id) for the plugin settings tab.
+  app.get('/status', (c) => {
+    const idx = deps.index;
+    return c.json({
+      ...health(),
+      indexed: idx ? idx.size : 0,
+      chatModel: idx ? idx.chatModelId() : 'none',
+      tools: [
+        'vaultnexus_ping','vaultnexus_search','vaultnexus_bridges',
+        'vaultnexus_trace','vaultnexus_reason','vaultnexus_history',
+        'vaultnexus_recall_history','vaultnexus_forecasts',
+      ],
+    });
+  });
+
   // POST /search { query, k? } → SearchHit[]
   app.post('/search', async (c) => {
     if (!deps.index) return c.json({ error: 'no index' }, 503);

@@ -10,11 +10,10 @@ interface VaultNexusPluginHost extends Plugin {
 interface DaemonStatus {
   ok: boolean;
   version?: string;
+  indexed?: number;
+  chatModel?: string;
+  tools?: string[];
   error?: string;
-}
-
-interface ToolsList {
-  tools?: Array<{ name: string }>;
 }
 
 export class VaultNexusSettingsTab extends PluginSettingTab {
@@ -216,62 +215,69 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
     this.statusEl.empty();
     this.toolsEl.empty();
     this.statusEl.createEl('span', { text: 'Probing…' });
+    this.statusEl.style.color = 'var(--text-muted)';
 
-    const health = await this.probeHealth(base);
+    const st = await this.probeStatus(base);
     this.statusEl.empty();
-    if (health.ok) {
-      this.statusEl.createEl('span', {
-        text: `✓ Daemon reachable at ${base}  —  version ${health.version ?? '?'}`,
+    if (st.ok) {
+      const head = this.statusEl.createDiv();
+      head.createEl('span', {
+        text: `✓ Daemon reachable at ${base}`,
       });
-      this.statusEl.style.color = 'var(--text-success)';
-      const tools = await this.probeTools(s.host, s.port);
-      if (tools && tools.tools) {
+      head.style.color = 'var(--text-success)';
+
+      const meta = this.statusEl.createDiv({ cls: 'vn-status-meta' });
+      meta.style.marginTop = '4px';
+      meta.style.color = 'var(--text-muted)';
+      meta.style.fontSize = '0.85em';
+      meta.createEl('div', { text: `Version  ${st.version ?? '?'}` });
+      meta.createEl('div', { text: `Indexed  ${st.indexed ?? 0} chunks` });
+      meta.createEl('div', { text: `Chat model  ${st.chatModel ?? 'fake'}${st.chatModel === 'fake' ? '  (set VAULTNEXUS_CHAT_PROVIDER + key for real LLM)' : ''}` });
+
+      if (st.tools && st.tools.length > 0) {
         this.toolsEl.empty();
-        this.toolsEl.createEl('div', {
-          text: `Tools available: ${tools.tools.map((t) => t.name).join(', ')}`,
-        });
+        this.toolsEl.createEl('div', { text: `MCP tools (${st.tools.length}):` });
+        const grid = this.toolsEl.createEl('div', { cls: 'vn-tools-grid' });
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = '1fr 1fr';
+        grid.style.gap = '2px 12px';
+        grid.style.marginTop = '4px';
+        for (const t of st.tools) {
+          const item = grid.createEl('div', { text: t });
+          item.style.color = 'var(--text-muted)';
+        }
       }
     } else {
       this.statusEl.createEl('span', {
-        text: `✗ Cannot reach daemon at ${base}: ${health.error}`,
+        text: `✗ Cannot reach daemon at ${base}: ${st.error}`,
       });
       this.statusEl.style.color = 'var(--text-error)';
       new Notice('VaultNexus daemon unreachable. Is it running?');
     }
   }
 
-  private async probeHealth(base: string): Promise<DaemonStatus> {
+  private async probeStatus(base: string): Promise<DaemonStatus> {
     try {
-      const r = await fetch(`${base}/health`, { method: 'GET' });
+      // Try /status first (richer); fall back to /health for older daemons.
+      let r = await fetch(`${base}/status`);
+      if (!r.ok) r = await fetch(`${base}/health`);
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
-      const j = (await r.json()) as { status: string; version: string };
-      return { ok: j.status === 'ok', version: j.version };
+      const j = (await r.json()) as {
+        status: string;
+        version: string;
+        indexed?: number;
+        chatModel?: string;
+        tools?: string[];
+      };
+      return {
+        ok: j.status === 'ok',
+        version: j.version,
+        indexed: j.indexed,
+        chatModel: j.chatModel,
+        tools: j.tools,
+      };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
-  private async probeTools(host: string, port: number): Promise<ToolsList | null> {
-    try {
-      // /search w/ empty query → bad → 400/422; instead just confirm OPTIONS or a known-good POST.
-      // No tools/list HTTP endpoint exists; this is informational best-effort. Return null silently if not available.
-      const r = await fetch(`http://${host}:${port}/health`, { method: 'GET' });
-      if (!r.ok) return null;
-      // Hardcoded list mirroring the registered MCP tools — surfaces capability without an extra HTTP route.
-      return {
-        tools: [
-          { name: 'vaultnexus_ping' },
-          { name: 'vaultnexus_search' },
-          { name: 'vaultnexus_bridges' },
-          { name: 'vaultnexus_trace' },
-          { name: 'vaultnexus_reason' },
-          { name: 'vaultnexus_history' },
-          { name: 'vaultnexus_recall_history' },
-          { name: 'vaultnexus_forecasts' },
-        ],
-      };
-    } catch {
-      return null;
     }
   }
 }
