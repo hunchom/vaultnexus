@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer, type Socket } from 'node:net';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, unlinkSync } from 'node:fs';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
 import { defaultSocketPath, defaultLockPath, defaultIndexSnapshotPath } from '../core/paths.js';
@@ -44,16 +44,42 @@ async function main(): Promise<void> {
   let snapshot: IndexSnapshot | null = null;
   let index: VaultIndex;
   if (vaultDir && snapPath !== 'off') {
-    // Plan 26 — restore unchanged notes from disk, rebuild only the deltas
-    snapshot = new IndexSnapshot(snapPath);
+    // Plan 26 — restore unchanged notes from disk, rebuild only the deltas.
+    // Corruption-recovery: SQLITE_NOTADB / garbage file → unlink + retry once → fall through to indexVault.
+    const openWithRecovery = async (): Promise<{ snap: IndexSnapshot; idx: VaultIndex; stats: import('./index-restore.js').RestoreStats } | null> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const snap = new IndexSnapshot(snapPath);
+          const { index: idx, stats } = await restoreOrRebuildIndex(vaultDir, embedder, snap, chatModel);
+          return { snap, idx, stats };
+        } catch (e) {
+          process.stderr.write(`vaultnexus: snapshot open failed (attempt ${attempt + 1}) ${String(e)}\n`);
+          try { unlinkSync(snapPath); } catch { /* file may not exist → ignore */ }
+          // sqlite WAL/SHM sidecars → drop too, else next open re-reads corrupt journal
+          for (const ext of ['-wal', '-shm', '-journal']) {
+            try { unlinkSync(snapPath + ext); } catch { /* ignore */ }
+          }
+        }
+      }
+      return null;
+    };
     const t0 = process.hrtime.bigint();
-    const { index: idx, stats } = await restoreOrRebuildIndex(vaultDir, embedder, snapshot, chatModel);
-    index = idx;
-    const ms = Number((process.hrtime.bigint() - t0) / 1_000_000n);
-    process.stderr.write(
-      `vaultnexus: indexed ${stats.total} notes from ${vaultDir} ` +
-      `(restored=${stats.restored} rebuilt=${stats.rebuilt} pruned=${stats.pruned}, ${ms}ms)\n`,
-    );
+    const recovered = await openWithRecovery();
+    if (recovered) {
+      snapshot = recovered.snap;
+      index = recovered.idx;
+      const ms = Number((process.hrtime.bigint() - t0) / 1_000_000n);
+      process.stderr.write(
+        `vaultnexus: indexed ${recovered.stats.total} notes from ${vaultDir} ` +
+        `(restored=${recovered.stats.restored} rebuilt=${recovered.stats.rebuilt} pruned=${recovered.stats.pruned}, ${ms}ms)\n`,
+      );
+    } else {
+      // snapshot unusable after recovery attempts → fall back to plain indexVault (Plan 06 path)
+      process.stderr.write('vaultnexus: snapshot disabled after corruption-recovery failure → using plain indexVault\n');
+      index = new VaultIndex(embedder, vaultDir, chatModel);
+      const n = await indexVault(vaultDir, index);
+      process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);
+    }
   } else {
     index = new VaultIndex(embedder, vaultDir, chatModel);
     if (vaultDir) {

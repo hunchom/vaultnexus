@@ -61,7 +61,8 @@ export function composeAnswerStream(
   }
 
   const iter = run();
-  // wrap iter → capture errors so finalize() can re-surface them
+  // wrap iter → capture errors so finalize() can re-surface them.
+  // forward return()/throw() → early break in for-await-of → iter cleanup runs → cancels in-flight HTTP
   const stream: AsyncIterable<string> = {
     [Symbol.asyncIterator]() {
       return {
@@ -72,6 +73,12 @@ export function composeAnswerStream(
             streamErr = e;
             throw e;
           }
+        },
+        async return(value?: unknown) {
+          return iter.return(value as undefined);
+        },
+        async throw(err?: unknown) {
+          return iter.throw(err);
         },
       };
     },

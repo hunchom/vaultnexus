@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, utimes, stat } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -103,6 +103,40 @@ describe('restoreOrRebuildIndex', () => {
     expect(stats.restored).toBe(2);
     expect(stats.pruned).toBe(1);
     expect(snap2.getNote(join('sub', 'b.md'))).toBeUndefined();
+    index.close();
+    snap2.close();
+  });
+
+  it('mtime drift on unchanged content → snapshot mtimeMs refreshed (line 54 in index-restore.ts)', async () => {
+    const path = tmpDb();
+    // cold pass → populate snapshot with initial mtime
+    const snap1 = new IndexSnapshot(path);
+    const cold = await restoreOrRebuildIndex(vault, new FakeEmbedder(64), snap1);
+    expect(cold.stats.rebuilt).toBe(3);
+    cold.index.close();
+    snap1.close();
+
+    // bump mtime on a.md WITHOUT changing content → same sha, different mtime
+    const aAbs = join(vault, 'a.md');
+    const originalSt = await stat(aAbs);
+    const newAtime = new Date(originalSt.atimeMs + 60_000);
+    const newMtime = new Date(originalSt.mtimeMs + 60_000);
+    await utimes(aAbs, newAtime, newMtime);
+    const driftedSt = await stat(aAbs);
+    const expectedMtimeMs = Math.floor(driftedSt.mtimeMs);
+    expect(expectedMtimeMs).not.toBe(Math.floor(originalSt.mtimeMs));
+
+    // warm pass → all 3 restored (content unchanged), but a.md's snapshot mtime refreshed
+    const snap2 = new IndexSnapshot(path);
+    const { index, stats } = await restoreOrRebuildIndex(vault, new FakeEmbedder(64), snap2);
+    expect(stats.restored).toBe(3);
+    expect(stats.rebuilt).toBe(0);
+    const refreshed = snap2.getNote('a.md');
+    expect(refreshed).toBeDefined();
+    expect(refreshed!.mtimeMs).toBe(expectedMtimeMs);
+    // sibling note (untouched mtime) still has its original mtime
+    const unchanged = snap2.getNote('c.md');
+    expect(unchanged!.mtimeMs).toBe(Math.floor((await stat(join(vault, 'c.md'))).mtimeMs));
     index.close();
     snap2.close();
   });
