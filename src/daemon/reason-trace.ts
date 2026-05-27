@@ -1,4 +1,6 @@
 import type { IndexedChunk, SearchHit } from './vault-index.js';
+import { dotF32 } from '../core/vectors.js';
+import { resolveLink } from './note-graph.js';
 
 /** Edge type that introduced a chunk into the chain. */
 export type EdgeType = 'seed' | 'wikilink' | 'knn';
@@ -70,5 +72,44 @@ export async function traceReasoning(
   }
 
   if (maxDepth === 0) return out;
+
+  // BFS: frontier carries the chunks just added at depth (level-1)
+  const paths = [...facade.noteLinks.keys()];
+  let frontier: number[] = out.map((h) => h.toChunkId);
+  let level = 1;
+
+  while (level <= maxDepth && frontier.length > 0 && out.length < maxHops) {
+    const nextFrontier: number[] = [];
+    for (const fromId of frontier) {
+      if (out.length >= maxHops) break;
+      const fromChunk = facade.chunks[fromId];
+      const links = facade.noteLinks.get(fromChunk.notePath) ?? [];
+      for (const link of links) {
+        if (out.length >= maxHops) break;
+        const resolved = resolveLink(link, paths);
+        if (!resolved || resolved === fromChunk.notePath) continue;
+        // every chunk on resolved note → emit-once via visited
+        for (let toId = 0; toId < facade.chunks.length; toId++) {
+          if (out.length >= maxHops) break;
+          if (facade.chunks[toId].notePath !== resolved) continue;
+          if (visited.has(toId)) continue;
+          visited.add(toId);
+          const score = dotF32(facade.f32[fromId], facade.f32[toId]);
+          out.push({
+            step: level,
+            fromChunkId: fromId,
+            toChunkId: toId,
+            edgeType: 'wikilink',
+            score,
+            chunk: facade.chunks[toId],
+          });
+          nextFrontier.push(toId);
+        }
+      }
+    }
+    frontier = nextFrontier;
+    level++;
+  }
+
   return out;
 }

@@ -46,3 +46,24 @@ describe('traceReasoning — seed-only behavior (maxDepth: 0)', () => {
     }
   });
 });
+
+describe('traceReasoning — wikilink BFS (maxDepth: 1)', () => {
+  it('follows [[B]] from A to a chunk on B, recording edgeType=wikilink', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', '# A\n\nthe quick brown fox jumps\n\nlink to [[B]] here\n');
+    await idx.addNote('B.md', '# B\n\ntotally different content payload\n\nmore B body\n\nstill on B note\n');
+    const facade = await facadeOver(idx);
+    const hops = await traceReasoning(facade, 'the quick brown fox jumps', {
+      maxDepth: 1,
+      kSeeds: 1, // only seed A.md's matching chunk → BFS reaches B via [[B]]
+    });
+
+    const wl = hops.filter((h) => h.edgeType === 'wikilink');
+    expect(wl.length).toBeGreaterThan(0);
+    const reached = wl.find((h) => h.chunk.notePath === 'B.md');
+    expect(reached).toBeDefined();
+    expect(reached!.fromChunkId).not.toBeNull();
+    expect(facade.chunks[reached!.fromChunkId!].notePath).toBe('A.md');
+    expect(reached!.step).toBe(1);
+  });
+});
