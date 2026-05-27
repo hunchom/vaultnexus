@@ -8,8 +8,8 @@ export interface Citation {
   byteEnd: number;
 }
 
-// [^:\]]+ → notePath (any char except ':' and ']'); paths in vault never contain ':'
-const CITATION_RE = /\[ref:([^:\]]+):(\d+)-(\d+)\]/g;
+// [^:\]\n]+ → notePath (any char except ':', ']', '\n'); vault paths never contain ':' or newlines
+const CITATION_RE = /\[ref:([^:\]\n]+):(\d+)-(\d+)\]/g;
 
 /** Pulls every `[ref:notePath:byteStart-byteEnd]` marker from `text`. Order = textual order. */
 export function extractCitations(text: string): Citation[] {

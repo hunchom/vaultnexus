@@ -32,6 +32,29 @@ describe('extractCitations', () => {
   it('malformed (no byte range) → no match', () => {
     expect(extractCitations('[ref:malformed]')).toEqual([]);
   });
+
+  it('duplicate citations same text → both extract (no dedup)', () => {
+    const got = extractCitations('[ref:a.md:0-10] [ref:a.md:0-10]');
+    expect(got).toHaveLength(2);
+    expect(got[0]).toEqual(got[1]);
+  });
+
+  it('adjacent no-whitespace citations → both extract', () => {
+    const got = extractCitations('[ref:a.md:0-10][ref:b.md:0-10]');
+    expect(got.map((c) => c.notePath)).toEqual(['a.md', 'b.md']);
+  });
+
+  it('unicode in notePath matches (regex char class is byte-agnostic)', () => {
+    const got = extractCitations('[ref:αβ/日本.md:0-10]');
+    expect(got).toHaveLength(1);
+    expect(got[0].notePath).toBe('αβ/日本.md');
+  });
+
+  it('citation spanning newline in notePath → rejected', () => {
+    // notePath cannot contain '\n' — vault paths are single-line
+    const got = extractCitations('[ref:a\nb.md:0-10]');
+    expect(got).toEqual([]);
+  });
 });
 
 describe('validateCitations', () => {
