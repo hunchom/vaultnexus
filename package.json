@@ -21,8 +21,12 @@
     "drift": "tsx src/eval/drift-check.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.79",
+    "@ai-sdk/openai": "^3.0.65",
+    "@ai-sdk/openai-compatible": "^2.0.48",
     "@hono/node-server": "^1.13.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "ai": "^6.0.191",
     "better-sqlite3": "^12.10.0",
     "gpt-tokenizer": "^3.4.0",
     "graphology": "^0.26.0",
