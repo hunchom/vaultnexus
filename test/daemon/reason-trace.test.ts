@@ -158,4 +158,58 @@ describe('traceReasoning — wikilink BFS (maxDepth: 1)', () => {
     expect(facade.chunks[reached!.fromChunkId!].notePath).toBe('A.md');
     expect(reached!.step).toBe(1);
   });
+
+  it('wikilink wins over kNN across frontier ordering', async () => {
+    // contract: chunk reachable via both wikilink + kNN at same level → tagged 'wikilink'
+    // FakeEmbedder hashes whole text → identical paragraphs across notes give cosine 1.0
+    // construction:
+    //   A.md → unique seed paragraph + [[X]] wikilink (A reaches X via wikilink)
+    //   B.md → paragraph IDENTICAL to X's first paragraph (B reaches X via kNN cos 1.0)
+    //   X.md → first paragraph identical to B → both A-wikilink AND B-kNN reach this chunk
+    // both A + B seeded into level-0 frontier. forced query order [B, A] →
+    // if BFS were per-fromId only: B's kNN would tag X-chunk 'knn' before A's wikilink-pass.
+    // correct two-pass BFS: wikilink-pass over WHOLE frontier first → X tagged 'wikilink'.
+    const sharedXText = 'paragraph identical across X and B for kNN edge cosine one';
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', `# A\n\nthe unique A seed paragraph alpha\n\nrouting via [[X]] here\n`);
+    await idx.addNote('B.md', `# B\n\n${sharedXText}\n`);
+    await idx.addNote('X.md', `# X\n\n${sharedXText}\n\nfiller x body distinct\n`);
+    const internals = idx as unknown as {
+      chunks: IndexedChunk[]; f32: Float32Array[]; noteLinks: Map<string, string[]>;
+    };
+    const chunkIdOf = (hit: SearchHit): number =>
+      internals.chunks.findIndex((c) => c.notePath === hit.notePath && c.byteStart === hit.byteStart);
+    // build forged seed hits manually → bypass natural query (X would otherwise self-match)
+    const aSeedChunk = internals.chunks.find((c) => c.notePath === 'A.md' && c.text.includes('alpha'))!;
+    const bSeedChunk = internals.chunks.find((c) => c.notePath === 'B.md' && c.text.includes('paragraph identical'))!;
+    expect(aSeedChunk).toBeDefined();
+    expect(bSeedChunk).toBeDefined();
+    const aSeed: SearchHit = { ...aSeedChunk, score: 1.0 };
+    const bSeed: SearchHit = { ...bSeedChunk, score: 1.0 };
+    const facade: TraceFacade = {
+      chunks: internals.chunks,
+      f32: internals.f32,
+      noteLinks: internals.noteLinks,
+      // forge order [B, A] → B's kNN-pass would race A's wikilink-pass under per-fromId BFS
+      query: async () => [bSeed, aSeed],
+      chunkIdOf,
+    };
+    const hops = await traceReasoning(facade, 'irrelevant', {
+      maxDepth: 1, simThreshold: 0.3, knnPerHop: 2, kSeeds: 2,
+    });
+    const xHops = hops.filter((h) => h.chunk.notePath === 'X.md');
+    expect(xHops.length).toBeGreaterThan(0);
+    // X's first chunk (text=sharedXText) is reachable via BOTH A-wikilink AND B-kNN → must be 'wikilink'
+    const sharedXHop = xHops.find((h) => h.chunk.text === sharedXText);
+    expect(sharedXHop, 'shared X chunk reached by both wikilink + kNN').toBeDefined();
+    expect(sharedXHop!.edgeType, 'wikilink must win over kNN across frontier').toBe('wikilink');
+    // inverse order → contract holds either way
+    const facade2: TraceFacade = { ...facade, query: async () => [aSeed, bSeed] };
+    const hops2 = await traceReasoning(facade2, 'irrelevant', {
+      maxDepth: 1, simThreshold: 0.3, knnPerHop: 2, kSeeds: 2,
+    });
+    const sharedXHop2 = hops2.find((h) => h.chunk.notePath === 'X.md' && h.chunk.text === sharedXText);
+    expect(sharedXHop2).toBeDefined();
+    expect(sharedXHop2!.edgeType).toBe('wikilink');
+  });
 });

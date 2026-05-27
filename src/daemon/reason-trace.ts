@@ -59,6 +59,7 @@ export async function traceReasoning(
   for (const hit of seeds) {
     if (out.length >= maxHops) return out;
     const id = facade.chunkIdOf(hit);
+    // hi-bound unreachable: chunkIdOf = findIndex over same chunks[]
     if (id < 0 || visited.has(id)) continue; // -1 = corrupted-index defensive skip
     visited.add(id);
     out.push({
@@ -83,11 +84,11 @@ export async function traceReasoning(
 
   while (level <= maxDepth && frontier.length > 0 && out.length < maxHops) {
     const nextFrontier: number[] = [];
+
+    // pass 1: wikilink-pass across WHOLE frontier first → wikilink wins ties vs kNN
     for (const fromId of frontier) {
       if (out.length >= maxHops) break;
       const fromChunk = facade.chunks[fromId];
-
-      // wikilink edges → every chunk on every resolved [[link]]
       const links = facade.noteLinks.get(fromChunk.notePath) ?? [];
       for (const link of links) {
         if (out.length >= maxHops) break;
@@ -110,21 +111,26 @@ export async function traceReasoning(
           nextFrontier.push(toId);
         }
       }
+    }
 
-      // kNN edges → cross-note top-knnPerHop ≥ simThreshold (intra-note skipped)
+    // pass 2: kNN-pass over same frontier → wikilink-visited chunks now skipped pre-cosine
+    // O(N·D) per frontier·level → fine at N=21, revisit at 10⁵ (use flatInt8 SIMD path)
+    for (const fromId of frontier) {
       if (out.length >= maxHops) break;
+      const fromChunk = facade.chunks[fromId];
       const candidates: Array<{ id: number; s: number }> = [];
       const vFrom = facade.f32[fromId];
       for (let id = 0; id < facade.chunks.length; id++) {
         if (id === fromId) continue;
         if (facade.chunks[id].notePath === fromChunk.notePath) continue; // cross-note only
+        if (visited.has(id)) continue; // skip pre-cosine → saves dotF32 + sort slot
         const s = dotF32(vFrom, facade.f32[id]);
         if (s >= simThreshold) candidates.push({ id, s });
       }
       candidates.sort((a, b) => b.s - a.s);
       for (const { id, s } of candidates.slice(0, knnPerHop)) {
         if (out.length >= maxHops) break;
-        if (visited.has(id)) continue;
+        if (visited.has(id)) continue; // re-check → earlier kNN in same pass may have claimed
         visited.add(id);
         out.push({
           step: level,
@@ -137,6 +143,7 @@ export async function traceReasoning(
         nextFrontier.push(id);
       }
     }
+
     frontier = nextFrontier;
     level++;
   }
