@@ -55,6 +55,18 @@ describe('git-history', () => {
     expect(content).toBe('---\ndate: 2024-02-15\n---\n# Hello\nsecond\n');
   });
 
+  it('noteRevisions w/ withContent: snapshot + frontmatterDate on the c2 revision', async () => {
+    const revs = await noteRevisions(fx.repo, 'notes/a.md', { withContent: true });
+    expect(revs.length).toBe(3);
+    // c2 lives at index 1 (newest-first); has frontmatter `date: 2024-02-15`
+    expect(revs[1].content).toBe('---\ndate: 2024-02-15\n---\n# Hello\nsecond\n');
+    expect(revs[1].frontmatterDate).toBeDefined();
+    expect(revs[1].frontmatterDate!.startsWith('2024-02-15')).toBe(true);
+    // c1 + c3 have no frontmatter → undefined
+    expect(revs[0].frontmatterDate).toBeUndefined();
+    expect(revs[2].frontmatterDate).toBeUndefined();
+  });
+
   it('noteRevisions: 3 revisions, descending by commitDate, valid sha + ISO', async () => {
     const revs = await noteRevisions(fx.repo, 'notes/a.md');
     expect(revs.length).toBe(3);

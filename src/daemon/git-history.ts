@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { extractFrontmatterDate } from '../core/markdown.js';
 
 const exec = promisify(execFile);
 // git emits literal NUL from `%x00` placeholder; arg stays NUL-free → execFile accepts.
@@ -55,7 +56,14 @@ export async function noteRevisions(
     const [sha, commitDate, message, authorEmail] = line.split(NUL);
     return { sha, commitDate, message, authorEmail };
   });
-  return all.slice(0, opts.maxRevisions ?? 50);
+  const sliced = all.slice(0, opts.maxRevisions ?? 50);
+  if (!opts.withContent) return sliced;
+  // parallel git-show per revision → annotate content + frontmatterDate
+  const contents = await Promise.all(sliced.map((r) => noteContentAt(repoPath, r.sha, notePath)));
+  return sliced.map((r, i) => {
+    const content = contents[i];
+    return { ...r, content, frontmatterDate: extractFrontmatterDate(content) };
+  });
 }
 
 /** Note content at `sha`. Throws if `notePath` missing at that ref. */
