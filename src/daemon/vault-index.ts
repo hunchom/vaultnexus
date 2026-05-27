@@ -7,6 +7,7 @@ import { FtsIndex } from './fts.js';
 import { fuseRRF } from '../core/fusion.js';
 import { extractWikilinks } from '../core/wikilinks.js';
 import { buildNoteGraph, detectCommunities, resolveLink } from './note-graph.js';
+import { traceReasoning, type ReasonHop, type TraceFacade, type TraceOptions } from './reason-trace.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -125,6 +126,21 @@ export class VaultIndex {
     const cos = new Map(vec.map((r) => [r.index, r.score]));
     // FTS-only hit (outside vector top-want) → compute its true cosine, never surface 0
     return fused.map((index) => ({ ...this.chunks[index], score: cos.get(index) ?? dotF32(q, this.f32[index]) }));
+  }
+
+  /** Graph-BFS citation chain (seed → wikilink + kNN). No LLM compose. */
+  async trace(question: string, opts: TraceOptions = {}): Promise<ReasonHop[]> {
+    if (this.chunks.length === 0) return [];
+    if (!this.flatInt8) this.build();
+    const facade: TraceFacade = {
+      chunks: this.chunks,
+      f32: this.f32,
+      noteLinks: this.noteLinks,
+      query: (text, k) => this.query(text, k),
+      chunkIdOf: (hit) =>
+        this.chunks.findIndex((c) => c.notePath === hit.notePath && c.byteStart === hit.byteStart),
+    };
+    return traceReasoning(facade, question, opts);
   }
 
   /** Release native FTS db handle. */
