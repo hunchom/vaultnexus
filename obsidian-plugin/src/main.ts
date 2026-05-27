@@ -2,15 +2,14 @@ import { Plugin, WorkspaceLeaf } from 'obsidian';
 import { VaultNexusSearchView, VIEW_TYPE_VAULTNEXUS_SEARCH } from './SearchView.js';
 
 // Loopback daemon port → must match VAULTNEXUS_HTTP_PORT default in src/daemon/main.ts.
+// Renderer runs in browser context → no process.env. Port override via settings tab, future work.
 const DEFAULT_PORT = 38473;
 
 export default class VaultNexusPlugin extends Plugin {
   async onload(): Promise<void> {
-    const port = Number(process.env.VAULTNEXUS_HTTP_PORT ?? DEFAULT_PORT);
-
     this.registerView(
       VIEW_TYPE_VAULTNEXUS_SEARCH,
-      (leaf: WorkspaceLeaf) => new VaultNexusSearchView(leaf, port),
+      (leaf: WorkspaceLeaf) => new VaultNexusSearchView(leaf, DEFAULT_PORT),
     );
 
     this.addCommand({
@@ -23,7 +22,7 @@ export default class VaultNexusPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_VAULTNEXUS_SEARCH);
+    // Obsidian auto-detaches views → no manual cleanup.
   }
 
   // Reuse existing leaf if open → else open in right sidebar.

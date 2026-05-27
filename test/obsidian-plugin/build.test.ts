@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +13,11 @@ describe('obsidian-plugin build smoke', () => {
     // (run `pnpm install --ignore-workspace` inside obsidian-plugin/ if missing).
     execSync('node esbuild.config.mjs', { cwd: PLUGIN_DIR, stdio: 'pipe' });
   }, 60000);
+
+  afterAll(() => {
+    // Clean build artifact → keep repo tidy.
+    rmSync(MAIN_JS, { force: true });
+  });
 
   it('produces main.js', () => {
     expect(existsSync(MAIN_JS)).toBe(true);

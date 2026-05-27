@@ -5,8 +5,8 @@ export const VIEW_TYPE_VAULTNEXUS_SEARCH = 'vaultnexus-search';
 interface SearchHit {
   notePath: string;
   headingPath: string[];
-  byteStart: number;
-  byteEnd: number;
+  byteStart: number; // reserved → future range-highlight in editor
+  byteEnd: number;   // reserved → future range-highlight in editor
   text: string;
   score: number;
 }
@@ -89,7 +89,11 @@ export class VaultNexusSearchView extends ItemView {
     link.style.fontWeight = '600';
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      this.app.workspace.openLinkText(h.notePath, '', false);
+      // Anchor → "Note#H1#H2" → Obsidian jumps to deepest heading.
+      const linktext = h.headingPath.length
+        ? `${h.notePath}#${h.headingPath.join('#')}`
+        : h.notePath;
+      this.app.workspace.openLinkText(linktext, '', false);
     });
 
     if (h.headingPath.length > 0) {
