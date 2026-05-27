@@ -13,6 +13,7 @@ import type { ChatModel, ChatComposeOpts } from '../core/chat-model.js';
 import { composeAnswer } from './reason-compose.js';
 import { narrateRecallHistory, type NarrateOptions } from './recall-narrate.js';
 import { scanVaultForecasts, type ForecastLedger } from './forecast-scan.js';
+import type { IndexSnapshot, SnapshotChunk } from './index-snapshot.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -38,12 +39,18 @@ export class VaultIndex {
   private scale = 1;
   private readonly fts = new FtsIndex();
   private readonly noteLinks = new Map<string, string[]>(); // notePath → bare wikilink targets
+  private snapshot: IndexSnapshot | null = null; // optional persistence sink (Plan 26)
 
   constructor(
     private readonly embedder: Embedder,
     private readonly vaultPath?: string,
     private readonly chatModel?: ChatModel,
   ) {}
+
+  /** Inject a snapshot store → subsequent addNote() persists chunks + meta. Plan 26. */
+  attachSnapshot(snapshot: IndexSnapshot): void {
+    this.snapshot = snapshot;
+  }
 
   /** Chat model id for transparency (returned in vaultnexus_reason). 'none' when unset. */
   chatModelId(): string {
@@ -54,21 +61,51 @@ export class VaultIndex {
     return this.chunks.length;
   }
 
-  /** Chunk a note, embed its blocks, store unit-norm for search. */
-  async addNote(notePath: string, source: string): Promise<void> {
+  /** Chunk a note, embed its blocks, store unit-norm for search. Persists to snapshot if attached + meta given. */
+  async addNote(notePath: string, source: string, meta?: { contentSha: string; mtimeMs: number }): Promise<void> {
     // tokenBudget:0 → one block per paragraph (paragraph = retrieval unit)
     const blocks = chunkDocument(source, { tokenBudget: 0 }).filter((c) => c.granularity === 'block');
-    if (blocks.length === 0) return;
+    if (blocks.length === 0) {
+      // still register meta + empty chunk set → snapshot stays in sync (no chunks to persist)
+      if (this.snapshot && meta) {
+        this.snapshot.setNote(notePath, meta.contentSha, meta.mtimeMs);
+        this.snapshot.putChunks(notePath, []);
+      }
+      return;
+    }
     this.noteLinks.set(notePath, extractWikilinks(source));
     const vecs = await this.embedder.embed(blocks.map((b) => b.text));
+    const unitVecs = vecs.map((v) => l2normalize(v));
+    const snapChunks: SnapshotChunk[] = [];
     blocks.forEach((b, i) => {
       const id = this.chunks.length;
       this.chunks.push({ notePath, headingPath: b.headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd });
-      this.f32.push(l2normalize(vecs[i]));
+      this.f32.push(unitVecs[i]);
       this.fts.add(id, b.text);
+      snapChunks.push({
+        headingPath: b.headingPath, text: b.text, byteStart: b.byteStart, byteEnd: b.byteEnd, vec: unitVecs[i],
+      });
     });
     this.dims = this.f32[0].length;
     this.flatInt8 = null; // new data → rebuild flat store on next query
+    if (this.snapshot && meta) {
+      this.snapshot.setNote(notePath, meta.contentSha, meta.mtimeMs);
+      this.snapshot.putChunks(notePath, snapChunks);
+    }
+  }
+
+  /** Restore a note's chunks + vecs from snapshot rows (no chunking, no embedding). Plan 26. */
+  restoreNote(notePath: string, source: string, chunks: SnapshotChunk[]): void {
+    if (chunks.length === 0) return;
+    this.noteLinks.set(notePath, extractWikilinks(source));
+    chunks.forEach((c) => {
+      const id = this.chunks.length;
+      this.chunks.push({ notePath, headingPath: c.headingPath, text: c.text, byteStart: c.byteStart, byteEnd: c.byteEnd });
+      this.f32.push(c.vec);
+      this.fts.add(id, c.text);
+    });
+    this.dims = this.f32[0].length;
+    this.flatInt8 = null;
   }
 
   /** Indexed notes with their bare wikilink targets (for graph build). */
