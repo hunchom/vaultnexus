@@ -18,7 +18,8 @@
     "dev:bridge": "tsx src/bridge/main.ts",
     "eval": "tsx src/eval/run.ts",
     "seed:demo": "tsx scripts/seed-demo-vault.ts",
-    "drift": "tsx src/eval/drift-check.ts"
+    "drift": "tsx src/eval/drift-check.ts",
+    "drift:perturb": "tsx src/eval/lexicon-perturb-check.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.79",
