@@ -409,12 +409,11 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
     const style = c.createEl('style');
     style.textContent = `
       .vaultnexus-settings {
-        --vn-serif: 'Iowan Old Style', 'Charter', 'Source Serif Pro', 'Source Serif 4',
-                    'Cambria', Georgia, ui-serif, serif;
+        --vn-text: var(--font-interface, var(--font-text, inherit));
         --vn-mono: var(--font-monospace, ui-monospace, 'JetBrains Mono', 'IBM Plex Mono',
                     Menlo, Consolas, monospace);
-        --vn-rule: color-mix(in srgb, var(--text-normal) 22%, transparent);
-        --vn-rule-strong: var(--text-normal);
+        --vn-rule: var(--background-modifier-border);
+        --vn-rule-strong: var(--background-modifier-border-hover, var(--background-modifier-border));
         --vn-accent: var(--interactive-accent);
         --vn-ok:   #2ea043;
         --vn-warn: #d4a526;
@@ -423,39 +422,38 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       }
 
       /* ── HERO ───────────────────────────────────────── */
-      .vaultnexus-settings .vn-hero { margin: 4px 0 28px 0; }
+      .vaultnexus-settings .vn-hero { margin: 0 0 18px 0; }
       .vaultnexus-settings .vn-eyebrow {
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: center; gap: 6px;
         font-family: var(--vn-mono);
-        font-size: 0.68em;
-        letter-spacing: 0.18em;
+        font-size: 0.66em;
+        letter-spacing: 0.16em;
         color: var(--text-muted);
         text-transform: uppercase;
       }
       .vaultnexus-settings .vn-eyebrow-sep { opacity: 0.5; }
       .vaultnexus-settings .vn-eyebrow-ver { color: var(--vn-accent); }
       .vaultnexus-settings .vn-hero-title {
-        font-family: var(--vn-serif);
-        font-style: italic;
-        font-weight: 500;
-        font-size: 2.4em;
-        letter-spacing: -0.015em;
-        margin: 6px 0 8px 0;
-        line-height: 1.05;
+        font-family: var(--vn-text);
+        font-weight: 700;
+        font-size: 1.4em;
+        letter-spacing: -0.01em;
+        margin: 4px 0 6px 0;
+        line-height: 1.2;
         color: var(--text-normal);
       }
       .vaultnexus-settings .vn-hero-lede {
-        margin: 0 0 18px 0;
-        max-width: 56ch;
+        margin: 0 0 12px 0;
+        max-width: 68ch;
         color: var(--text-muted);
-        font-size: 0.94em;
+        font-size: 0.88em;
         line-height: 1.5;
       }
       .vaultnexus-settings .vn-rule {
         height: 1px; background: var(--vn-rule); margin: 0;
       }
       .vaultnexus-settings .vn-rule-strong {
-        height: 2px; background: var(--vn-rule-strong); opacity: 0.85;
+        height: 1px; background: var(--vn-rule); margin: 0;
       }
 
       /* ── STATUS GRID ────────────────────────────────── */
@@ -468,18 +466,11 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
         border-bottom: none;
       }
       .vaultnexus-settings .vn-cell {
-        padding: 14px 16px 16px 16px;
+        padding: 12px 14px 14px 14px;
         border-right: 1px solid var(--vn-rule);
         border-bottom: 1px solid var(--vn-rule);
         display: flex; flex-direction: column; gap: 6px;
-        background:
-          repeating-linear-gradient(
-            135deg,
-            transparent 0,
-            transparent 24px,
-            color-mix(in srgb, var(--text-normal) 1.5%, transparent) 24px,
-            color-mix(in srgb, var(--text-normal) 1.5%, transparent) 25px
-          );
+        background: var(--background-secondary);
       }
       .vaultnexus-settings .vn-cell:last-child { border-right: none; }
       .vaultnexus-settings .vn-cell-head {
@@ -495,17 +486,22 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       .vaultnexus-settings .vn-cell-num {
         font-family: var(--vn-mono);
         font-variant-numeric: tabular-nums;
-        font-size: 1.7em;
-        font-weight: 500;
+        font-size: 1.35em;
+        font-weight: 600;
         color: var(--text-normal);
         line-height: 1.1;
-        letter-spacing: -0.01em;
+        letter-spacing: -0.005em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .vaultnexus-settings .vn-cell-sub {
         font-size: 0.78em;
-        color: var(--text-faint);
-        font-style: italic;
+        color: var(--text-muted);
         min-height: 1.1em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       /* Broadcast cue lamp — solid dot with inner glow. */
@@ -590,10 +586,9 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
         font-weight: 600;
       }
       .vaultnexus-settings .vn-section-name {
-        font-family: var(--vn-serif);
-        font-style: italic;
-        font-weight: 500;
-        font-size: 1.4em;
+        font-family: var(--vn-text);
+        font-weight: 700;
+        font-size: 1.05em;
         color: var(--text-normal);
         letter-spacing: -0.005em;
       }
@@ -681,31 +676,14 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       .vaultnexus-settings .vn-cs-err     { color: var(--vn-down); }
       .vaultnexus-settings .vn-cs-pending { color: var(--text-muted); }
 
-      /* Re-style Obsidian's <Setting> rows → match section vibe (no rounded). */
-      .vaultnexus-settings .setting-item {
-        border-top: 1px dashed var(--vn-rule);
-        padding: 14px 0;
-      }
-      .vaultnexus-settings .setting-item:first-of-type { border-top: none; }
+      /* Let Obsidian's <Setting> rows keep their native idiom — only nudge typography. */
       .vaultnexus-settings .setting-item-name {
-        font-family: var(--vn-serif);
-        font-size: 1.02em;
-        letter-spacing: -0.005em;
-      }
-      .vaultnexus-settings .setting-item-description {
-        font-size: 0.85em;
-        color: var(--text-muted);
-        line-height: 1.5;
+        font-weight: 600;
       }
       .vaultnexus-settings .setting-item input[type="text"],
       .vaultnexus-settings .setting-item input[type="password"],
       .vaultnexus-settings .setting-item input[type="number"] {
         font-family: var(--vn-mono);
-        border-radius: 0;
-      }
-      .vaultnexus-settings .setting-item .dropdown {
-        font-family: var(--vn-mono);
-        border-radius: 0;
       }
 
       /* ── ADVANCED <details> ─────────────────────────── */
@@ -761,13 +739,15 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
 
       /* ── FOOTER ─────────────────────────────────────── */
       .vaultnexus-settings .vn-foot {
-        margin-top: 32px;
+        margin-top: 24px;
+        padding-top: 12px;
+        border-top: 1px solid var(--vn-rule);
         text-align: center;
       }
       .vaultnexus-settings .vn-foot-mark {
         font-family: var(--vn-mono);
         font-size: 0.66em;
-        letter-spacing: 0.4em;
+        letter-spacing: 0.32em;
         color: var(--text-faint);
       }
     `;

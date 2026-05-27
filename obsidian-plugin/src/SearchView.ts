@@ -175,9 +175,9 @@ export class VaultNexusSearchView extends ItemView {
     const style = root.createEl('style');
     style.textContent = `
       .vaultnexus-search-view {
-        --vn-serif: 'Iowan Old Style','Charter','Source Serif Pro','Source Serif 4','Cambria',Georgia,ui-serif,serif;
+        --vn-text: var(--font-interface, var(--font-text, inherit));
         --vn-mono: var(--font-monospace, ui-monospace,'JetBrains Mono','IBM Plex Mono',Menlo,Consolas,monospace);
-        --vn-rule: color-mix(in srgb, var(--text-normal) 22%, transparent);
+        --vn-rule: var(--background-modifier-border);
         --vn-accent: var(--interactive-accent);
         --vn-ok: #2ea043; --vn-down: #d05656;
         padding: 4px 2px;
@@ -208,10 +208,9 @@ export class VaultNexusSearchView extends ItemView {
         color: var(--text-muted);
       }
       .vaultnexus-search-view .vn-sv-title {
-        font-family: var(--vn-serif);
-        font-style: italic;
-        font-weight: 500;
-        font-size: 1.35em;
+        font-family: var(--vn-text);
+        font-weight: 700;
+        font-size: 1.05em;
         margin: 4px 0 8px 0;
         letter-spacing: -0.005em;
       }
@@ -270,10 +269,9 @@ export class VaultNexusSearchView extends ItemView {
         font-weight: 600;
       }
       .vaultnexus-search-view .vn-sv-hit-link {
-        font-family: var(--vn-serif);
-        font-style: italic;
-        font-size: 1.02em;
-        font-weight: 500;
+        font-family: var(--vn-text);
+        font-size: 0.98em;
+        font-weight: 600;
         cursor: pointer;
         color: var(--text-normal);
       }
