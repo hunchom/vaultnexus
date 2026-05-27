@@ -23,11 +23,8 @@
     "drift": "tsx src/eval/drift-check.ts",
     "drift:perturb": "tsx src/eval/lexicon-perturb-check.ts",
     "reason:stream": "tsx src/eval/reason-stream-cli.ts",
-<<<<<<< HEAD
-    "package:mcpb": "tsx scripts/build-mcpb.ts"
-=======
+    "package:mcpb": "tsx scripts/build-mcpb.ts",
     "build:obsidian": "cd obsidian-plugin && pnpm install --ignore-workspace --ignore-scripts && pnpm build"
->>>>>>> feat/obsidian-plugin
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.79",
