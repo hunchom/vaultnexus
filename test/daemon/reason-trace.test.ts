@@ -47,6 +47,58 @@ describe('traceReasoning — seed-only behavior (maxDepth: 0)', () => {
   });
 });
 
+describe('traceReasoning — edge cases', () => {
+  it('empty index → trace() returns []', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(32));
+    expect(await idx.trace('anything')).toEqual([]);
+  });
+
+  it('honors maxHops cap even when more candidates exist', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', '# A\n\nshared insight x\n\nshared insight y\n\nshared insight z\n');
+    await idx.addNote('B.md', '# B\n\nshared insight x\n\nshared insight y\n\nshared insight z\n');
+    await idx.addNote('C.md', '# C\n\nshared insight x\n\nshared insight y\n\nshared insight z\n');
+    const cap = 2;
+    const hops = await idx.trace('shared insight', {
+      maxDepth: 2,
+      kSeeds: 5,
+      knnPerHop: 5,
+      simThreshold: -1,
+      maxHops: cap,
+    });
+    expect(hops.length).toBeLessThanOrEqual(cap);
+  });
+
+  it('deterministic: two runs with same inputs deep-equal', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', '# A\n\nthe central topic\n\nlink to [[B]]\n');
+    await idx.addNote('B.md', '# B\n\nrelated body content\n\nmore stuff\n');
+    const opts = { maxDepth: 2, kSeeds: 2, knnPerHop: 2, simThreshold: 0.3 };
+    const a = await idx.trace('the central topic', opts);
+    const b = await idx.trace('the central topic', opts);
+    expect(a).toEqual(b);
+  });
+
+  it('byte offsets satisfy 0 ≤ byteStart < byteEnd ≤ sourceByteLen for every hop', async () => {
+    const sources: Record<string, string> = {
+      'A.md': '# A\n\nthe central topic\n\nbody filler a\n',
+      'B.md': '# B\n\nrelated body content\n\nmore stuff here\n',
+    };
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    for (const [p, s] of Object.entries(sources)) await idx.addNote(p, s);
+    const hops = await idx.trace('the central topic', { maxDepth: 1, kSeeds: 2 });
+    for (const h of hops) {
+      const srcLen = Buffer.byteLength(sources[h.chunk.notePath]);
+      expect(h.chunk.byteStart).toBeGreaterThanOrEqual(0);
+      expect(h.chunk.byteStart).toBeLessThan(h.chunk.byteEnd);
+      expect(h.chunk.byteEnd).toBeLessThanOrEqual(srcLen);
+      // verify text matches source slice (mechanical citation invariant)
+      const slice = Buffer.from(sources[h.chunk.notePath]).subarray(h.chunk.byteStart, h.chunk.byteEnd).toString();
+      expect(slice).toBe(h.chunk.text);
+    }
+  });
+});
+
 describe('traceReasoning — kNN cross-note BFS (maxDepth: 1)', () => {
   it('reaches a sibling note via k-NN edge when text is identical, no wikilinks', async () => {
     // FakeEmbedder: identical text → identical unit vector → cosine 1.0 across notes
