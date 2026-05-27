@@ -47,6 +47,29 @@ describe('traceReasoning — seed-only behavior (maxDepth: 0)', () => {
   });
 });
 
+describe('traceReasoning — kNN cross-note BFS (maxDepth: 1)', () => {
+  it('reaches a sibling note via k-NN edge when text is identical, no wikilinks', async () => {
+    // FakeEmbedder: identical text → identical unit vector → cosine 1.0 across notes
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', '# A\n\nshared insight about systems\n\nfiller a one\n');
+    await idx.addNote('B.md', '# B\n\nshared insight about systems\n\nfiller b two\n');
+    const facade = await facadeOver(idx);
+    const hops = await traceReasoning(facade, 'shared insight about systems', {
+      maxDepth: 1,
+      kSeeds: 1,
+      knnPerHop: 2,
+      simThreshold: 0.3,
+    });
+
+    const knn = hops.filter((h) => h.edgeType === 'knn');
+    expect(knn.length).toBeGreaterThan(0);
+    const reached = knn.find((h) => h.chunk.notePath !== facade.chunks[h.fromChunkId!].notePath);
+    expect(reached).toBeDefined();
+    expect(reached!.step).toBe(1);
+    expect(reached!.score).toBeGreaterThanOrEqual(0.3);
+  });
+});
+
 describe('traceReasoning — wikilink BFS (maxDepth: 1)', () => {
   it('follows [[B]] from A to a chunk on B, recording edgeType=wikilink', async () => {
     const idx = new VaultIndex(new FakeEmbedder(64));

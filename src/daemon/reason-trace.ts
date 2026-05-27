@@ -73,6 +73,9 @@ export async function traceReasoning(
 
   if (maxDepth === 0) return out;
 
+  const knnPerHop = opts.knnPerHop ?? DEFAULTS.knnPerHop;
+  const simThreshold = opts.simThreshold ?? DEFAULTS.simThreshold;
+
   // BFS: frontier carries the chunks just added at depth (level-1)
   const paths = [...facade.noteLinks.keys()];
   let frontier: number[] = out.map((h) => h.toChunkId);
@@ -83,12 +86,13 @@ export async function traceReasoning(
     for (const fromId of frontier) {
       if (out.length >= maxHops) break;
       const fromChunk = facade.chunks[fromId];
+
+      // wikilink edges → every chunk on every resolved [[link]]
       const links = facade.noteLinks.get(fromChunk.notePath) ?? [];
       for (const link of links) {
         if (out.length >= maxHops) break;
         const resolved = resolveLink(link, paths);
         if (!resolved || resolved === fromChunk.notePath) continue;
-        // every chunk on resolved note → emit-once via visited
         for (let toId = 0; toId < facade.chunks.length; toId++) {
           if (out.length >= maxHops) break;
           if (facade.chunks[toId].notePath !== resolved) continue;
@@ -105,6 +109,32 @@ export async function traceReasoning(
           });
           nextFrontier.push(toId);
         }
+      }
+
+      // kNN edges → cross-note top-knnPerHop ≥ simThreshold (intra-note skipped)
+      if (out.length >= maxHops) break;
+      const candidates: Array<{ id: number; s: number }> = [];
+      const vFrom = facade.f32[fromId];
+      for (let id = 0; id < facade.chunks.length; id++) {
+        if (id === fromId) continue;
+        if (facade.chunks[id].notePath === fromChunk.notePath) continue; // cross-note only
+        const s = dotF32(vFrom, facade.f32[id]);
+        if (s >= simThreshold) candidates.push({ id, s });
+      }
+      candidates.sort((a, b) => b.s - a.s);
+      for (const { id, s } of candidates.slice(0, knnPerHop)) {
+        if (out.length >= maxHops) break;
+        if (visited.has(id)) continue;
+        visited.add(id);
+        out.push({
+          step: level,
+          fromChunkId: fromId,
+          toChunkId: id,
+          edgeType: 'knn',
+          score: s,
+          chunk: facade.chunks[id],
+        });
+        nextFrontier.push(id);
       }
     }
     frontier = nextFrontier;
