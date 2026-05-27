@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, renameSync } from 'node:
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { noteRevisions, isGitRepo } from '../../src/daemon/git-history.js';
+import { noteRevisions, isGitRepo, noteContentAt } from '../../src/daemon/git-history.js';
 
 // Seed a deterministic 3-commit history on `notes/a.md` w/ ISO commit dates.
 function seedRepo(): { repo: string; cleanup: () => void } {
@@ -46,6 +46,13 @@ describe('git-history', () => {
     const nonGit = mkdtempSync(join(tmpdir(), 'vn-nogit-'));
     try { expect(await isGitRepo(nonGit)).toBe(false); }
     finally { rmSync(nonGit, { recursive: true, force: true }); }
+  });
+
+  it('noteContentAt: snapshot of the 2nd commit (newest-first index 1) matches seeded content', async () => {
+    const revs = await noteRevisions(fx.repo, 'notes/a.md');
+    // newest-first: [c3, c2, c1] → 2nd commit = revs[1]
+    const content = await noteContentAt(fx.repo, revs[1].sha, 'notes/a.md');
+    expect(content).toBe('---\ndate: 2024-02-15\n---\n# Hello\nsecond\n');
   });
 
   it('noteRevisions: 3 revisions, descending by commitDate, valid sha + ISO', async () => {

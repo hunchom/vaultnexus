@@ -57,3 +57,14 @@ export async function noteRevisions(
   });
   return all.slice(0, opts.maxRevisions ?? 50);
 }
+
+/** Note content at `sha`. Throws if `notePath` missing at that ref. */
+export async function noteContentAt(repoPath: string, sha: string, notePath: string): Promise<string> {
+  const { stdout } = await exec(
+    'git',
+    ['-C', repoPath, 'show', `${sha}:${notePath}`],
+    { maxBuffer: MAX_BUF },
+  );
+  return stdout;
+}
+

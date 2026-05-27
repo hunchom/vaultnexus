@@ -30,6 +30,15 @@ function bodyCharStart(source: string): number {
   return source[afterClose] === '\n' ? afterClose + 1 : afterClose;
 }
 
+/** User-declared frontmatter `date:` as ISO string, undefined if missing/invalid. */
+export function extractFrontmatterDate(source: string): string | undefined {
+  const fm = matter(source).data as Record<string, unknown> | undefined;
+  const raw = fm?.date;
+  if (raw === undefined || raw === null) return undefined;
+  const iso = raw instanceof Date ? raw.toISOString() : String(raw);
+  return Number.isNaN(Date.parse(iso)) ? undefined : iso;
+}
+
 /** Parse a note: strip frontmatter, parse body to positioned mdast. */
 export function parseMarkdown(source: string): ParsedMarkdown {
   const parsed = matter(source);
