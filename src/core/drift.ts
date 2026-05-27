@@ -87,3 +87,50 @@ export function supportingClaimSlope(samples: Array<{ date: string; count: numbe
   const points = samples.map((s) => ({ t: toDays(s.date, anchor), y: s.count }));
   return leastSquaresSlope(points);
 }
+
+/** Single revision input to driftFlag. `supportingClaimCount` = wikilink count in body. */
+export interface DriftRevision {
+  date: string;
+  content: string;
+  supportingClaimCount: number;
+}
+
+/** Tunables for the drift rule. Defaults: minCS 0.0005 pts/day, maxSS 0.005 links/day. */
+export interface DriftOpts {
+  minConvictionSlope?: number;
+  maxSupportingSlope?: number;
+}
+
+/**
+ * Drift rule: fire iff convictionSlope ≥ minCS AND supportingClaimSlope ≤ maxSS AND n≥3.
+ *
+ * AND-with-tolerance is load-bearing (concept §10.9): healthy settling has conviction-up
+ * AND supporting-up → must NOT fire. Pathological drift has conviction-up + supporting-flat
+ * → fires. n<3 → null (meaningful trajectory needs ≥3 points).
+ */
+export function driftFlag(
+  notePath: string,
+  revisions: DriftRevision[],
+  opts: DriftOpts = {},
+): DriftEvent | null {
+  if (revisions.length < 3) return null;
+  const minCS = opts.minConvictionSlope ?? 0.0005;
+  const maxSS = opts.maxSupportingSlope ?? 0.005;
+  const samples = revisions.map((r) => ({
+    date: r.date,
+    conviction: conviction(r.content),
+    supportingClaims: r.supportingClaimCount,
+  }));
+  const cs = convictionSlope(samples.map((s) => ({ date: s.date, score: s.conviction })));
+  const ss = supportingClaimSlope(samples.map((s) => ({ date: s.date, count: s.supportingClaims })));
+  if (cs >= minCS && ss <= maxSS) {
+    return {
+      notePath,
+      convictionSlope: cs,
+      supportingClaimSlope: ss,
+      samples,
+      reason: 'conviction-up-supporting-flat',
+    };
+  }
+  return null;
+}

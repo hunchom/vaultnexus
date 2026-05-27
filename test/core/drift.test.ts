@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { conviction, convictionSlope, supportingClaimSlope } from '../../src/core/drift.js';
+import {
+  conviction,
+  convictionSlope,
+  supportingClaimSlope,
+  driftFlag,
+  type DriftRevision,
+} from '../../src/core/drift.js';
 
 describe('conviction', () => {
   it('empty string → 0', () => {
@@ -114,5 +120,89 @@ describe('supportingClaimSlope', () => {
       { date: '2024-02-01', count: 2 },
       { date: '2024-03-01', count: 2 },
     ])).toBe(0);
+  });
+});
+
+describe('driftFlag', () => {
+  // 100 filler words ('word' repeated) → conviction = (assertions - hedges) / 100
+  // → adding N assertion words yields ≈ N/100 conviction (assertions are 1 word each in count)
+  const FILLER = 'word '.repeat(100).trim();
+
+  /** Synthesize text targeting a given conviction density via assertion-word count. */
+  function textWithConviction(density: number): string {
+    // 100 filler words + K assertion words → (K - 0) / (100 + K)
+    // Solve: density = K / (100 + K) → K = 100 * density / (1 - density). Round to nearest int.
+    const k = Math.max(0, Math.round((100 * density) / Math.max(1e-9, 1 - density)));
+    const assertions = Array.from({ length: k }, () => 'definitely').join(' ');
+    return assertions ? `${assertions} ${FILLER}` : FILLER;
+  }
+
+  // Pathological: conviction climbs (≈0.01 → 0.04 → 0.08), supporting flat at 1.
+  it('pathological case → fires with conviction-up-supporting-flat', () => {
+    const revisions: DriftRevision[] = [
+      { date: '2024-01-01', content: textWithConviction(0.01), supportingClaimCount: 1 },
+      { date: '2024-02-01', content: textWithConviction(0.04), supportingClaimCount: 1 },
+      { date: '2024-03-01', content: textWithConviction(0.08), supportingClaimCount: 1 },
+    ];
+    const flag = driftFlag('notes/x.md', revisions, {
+      minConvictionSlope: 0.0005,
+      maxSupportingSlope: 0.005,
+    });
+    expect(flag).not.toBeNull();
+    expect(flag!.reason).toBe('conviction-up-supporting-flat');
+    expect(flag!.notePath).toBe('notes/x.md');
+    expect(flag!.convictionSlope).toBeGreaterThan(0.0005);
+    expect(flag!.supportingClaimSlope).toBeLessThanOrEqual(0.005);
+    expect(flag!.samples).toHaveLength(3);
+  });
+
+  // Confound-discrimination: healthy settling = both rise → must NOT fire.
+  // LOAD-BEARING: prior session's killed claim was that drift would fail its own gate
+  // due to conviction↔evidence-count natural correlation. AND-with-tolerance rule
+  // discriminates: supporting rising (≥0.05/day) above maxSupportingSlope tolerance → null.
+  it('healthy-settling confound case → null (supporting also rises)', () => {
+    const revisions: DriftRevision[] = [
+      { date: '2024-01-01', content: textWithConviction(0.01), supportingClaimCount: 1 },
+      { date: '2024-02-01', content: textWithConviction(0.04), supportingClaimCount: 3 },
+      { date: '2024-03-01', content: textWithConviction(0.08), supportingClaimCount: 5 },
+    ];
+    const flag = driftFlag('notes/x.md', revisions, {
+      minConvictionSlope: 0.0005,
+      maxSupportingSlope: 0.005,
+    });
+    expect(flag).toBeNull();
+  });
+
+  it('noise case → null (conviction zigzags below threshold)', () => {
+    const revisions: DriftRevision[] = [
+      { date: '2024-01-01', content: textWithConviction(0.02), supportingClaimCount: 1 },
+      { date: '2024-02-01', content: textWithConviction(0.03), supportingClaimCount: 1 },
+      { date: '2024-03-01', content: textWithConviction(0.02), supportingClaimCount: 1 },
+    ];
+    const flag = driftFlag('notes/x.md', revisions, {
+      minConvictionSlope: 0.0005,
+      maxSupportingSlope: 0.005,
+    });
+    expect(flag).toBeNull();
+  });
+
+  it('too-few-revisions case → null regardless of slopes', () => {
+    const revisions: DriftRevision[] = [
+      { date: '2024-01-01', content: textWithConviction(0.01), supportingClaimCount: 1 },
+      { date: '2024-03-01', content: textWithConviction(0.08), supportingClaimCount: 1 },
+    ];
+    expect(driftFlag('notes/x.md', revisions)).toBeNull();
+    expect(driftFlag('notes/x.md', [])).toBeNull();
+    expect(driftFlag('notes/x.md', [revisions[0]])).toBeNull();
+  });
+
+  it('uses default thresholds when opts omitted', () => {
+    // Same pathological case, default opts → must still fire
+    const revisions: DriftRevision[] = [
+      { date: '2024-01-01', content: textWithConviction(0.01), supportingClaimCount: 1 },
+      { date: '2024-02-01', content: textWithConviction(0.04), supportingClaimCount: 1 },
+      { date: '2024-03-01', content: textWithConviction(0.08), supportingClaimCount: 1 },
+    ];
+    expect(driftFlag('notes/x.md', revisions)).not.toBeNull();
   });
 });
