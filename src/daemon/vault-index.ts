@@ -8,6 +8,7 @@ import { fuseRRF } from '../core/fusion.js';
 import { extractWikilinks } from '../core/wikilinks.js';
 import { buildNoteGraph, detectCommunities, resolveLink } from './note-graph.js';
 import { traceReasoning, type ReasonHop, type TraceFacade, type TraceOptions } from './reason-trace.js';
+import { noteRevisions, type HistoryOptions, type Revision } from './git-history.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -34,7 +35,10 @@ export class VaultIndex {
   private readonly fts = new FtsIndex();
   private readonly noteLinks = new Map<string, string[]>(); // notePath → bare wikilink targets
 
-  constructor(private readonly embedder: Embedder) {}
+  constructor(
+    private readonly embedder: Embedder,
+    private readonly vaultPath?: string,
+  ) {}
 
   get size(): number {
     return this.chunks.length;
@@ -141,6 +145,12 @@ export class VaultIndex {
         this.chunks.findIndex((c) => c.notePath === hit.notePath && c.byteStart === hit.byteStart),
     };
     return traceReasoning(facade, question, opts);
+  }
+
+  /** Git-history walker for `notePath` (POSIX-relative to vaultPath). [] when vaultPath unset. */
+  async history(notePath: string, opts: HistoryOptions = {}): Promise<Revision[]> {
+    if (!this.vaultPath) return [];
+    return noteRevisions(this.vaultPath, notePath, opts);
   }
 
   /** Release native FTS db handle. */

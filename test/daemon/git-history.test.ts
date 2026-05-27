@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { noteRevisions, isGitRepo, noteContentAt } from '../../src/daemon/git-history.js';
+import { VaultIndex } from '../../src/daemon/vault-index.js';
+import { FakeEmbedder } from '../../src/core/embedder.js';
 
 // Seed a deterministic 3-commit history on `notes/a.md` w/ ISO commit dates.
 function seedRepo(): { repo: string; cleanup: () => void } {
@@ -78,6 +80,25 @@ describe('git-history', () => {
     }
     const dates = revs.map((r) => Date.parse(r.commitDate));
     expect(dates).toEqual([...dates].sort((a, b) => b - a));
+  });
+});
+
+describe('VaultIndex.history', () => {
+  let fx: { repo: string; cleanup: () => void };
+  beforeAll(() => { fx = seedRepo(); });
+  afterAll(() => { fx.cleanup(); });
+
+  it('returns [] when vaultPath is unset', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(32));
+    expect(await idx.history('notes/a.md')).toEqual([]);
+  });
+
+  it('returns revisions when vaultPath points at a git repo', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(32), fx.repo);
+    await idx.addNote('notes/a.md', 'third\n');
+    const revs = await idx.history('notes/a.md');
+    expect(revs.length).toBe(3);
+    expect(revs[0].sha).toMatch(/^[0-9a-f]{40}$/);
   });
 });
 
