@@ -5,6 +5,8 @@ import { calibrateScale, quantize } from '../core/quantize.js';
 import { search } from '../core/search.js';
 import { FtsIndex } from './fts.js';
 import { fuseRRF } from '../core/fusion.js';
+import { classifyQuery, weightsForIntent, type QueryIntent } from '../core/router.js';
+import { dppSelect, type DppItem } from '../core/dpp.js';
 import { extractWikilinks } from '../core/wikilinks.js';
 import { buildNoteGraph, detectCommunities, resolveLink } from './note-graph.js';
 import { traceReasoning, type ReasonHop, type TraceFacade, type TraceOptions } from './reason-trace.js';
@@ -25,6 +27,21 @@ export interface IndexedChunk {
 
 export interface SearchHit extends IndexedChunk {
   score: number;
+}
+
+/** Plan 25 — optional query-time controls.
+ *  router: true → classifyQuery() → fusion weights per intent (default false = balanced 1.0/1.0).
+ *  diversity: 0..1 → DPP rerank top-(k*4) chunks with λ = 1-diversity (0 = off, 0.3 = moderate). */
+export interface QueryOptions {
+  router?: boolean;
+  diversity?: number;
+}
+
+/** Plan 25 telemetry — what the router decided + DPP applied. Returned by queryWithMeta(). */
+export interface QueryMeta {
+  intent: QueryIntent | null;       // null when router off
+  weights: [number, number] | null; // [vec, fts]; null when router off (fused with defaults)
+  diversity: number;                // λ-resolved diversity (0 = no DPP applied)
 }
 
 export interface Bridge { a: IndexedChunk; b: IndexedChunk; similarity: number; crossCommunity: boolean; linked: boolean; }
@@ -161,9 +178,21 @@ export class VaultIndex {
     return out.slice(0, topN);
   }
 
-  /** Embed query, search, return cited hits. vector ⊕ FTS → RRF fusion. */
-  async query(text: string, k = 10): Promise<SearchHit[]> {
-    if (this.chunks.length === 0) return [];
+  /** Embed query, search, return cited hits. vector ⊕ FTS → (optionally weighted) RRF fusion,
+   *  then (optionally) DPP rerank for diversity. opts default = Plan 08 behavior. */
+  async query(text: string, k = 10, opts: QueryOptions = {}): Promise<SearchHit[]> {
+    return (await this.queryWithMeta(text, k, opts)).hits;
+  }
+
+  /** Same as query() but also returns router/diversity telemetry. Plan 25. */
+  async queryWithMeta(
+    text: string,
+    k = 10,
+    opts: QueryOptions = {},
+  ): Promise<{ hits: SearchHit[]; meta: QueryMeta }> {
+    if (this.chunks.length === 0) {
+      return { hits: [], meta: { intent: null, weights: null, diversity: 0 } };
+    }
     if (!this.flatInt8) this.build();
     const [qe] = await this.embedder.embed([text]);
     const q = l2normalize(qe);
@@ -173,10 +202,46 @@ export class VaultIndex {
       count: this.chunks.length, dims: this.dims, scale: this.scale, k: want,
     });
     const lex = this.fts.search(text, want);
-    const fused = fuseRRF([vec.map((r) => r.index), lex.map((r) => r.id)]).slice(0, k);
+
+    // Router → fusion weights. Default (off) → balanced 1.0/1.0 (Plan 08 behavior).
+    let intent: QueryIntent | null = null;
+    let weights: [number, number] | null = null;
+    let fusionWeights: number[] | undefined;
+    if (opts.router) {
+      intent = classifyQuery(text);
+      const w = weightsForIntent(intent);
+      weights = [w.vector, w.fts];
+      fusionWeights = [w.vector, w.fts];
+    }
+
+    const fusedAll = fuseRRF(
+      [vec.map((r) => r.index), lex.map((r) => r.id)],
+      60,
+      fusionWeights,
+    );
+
+    // DPP rerank (optional). λ = 1 - diversity → diversity=0 means λ=1 means no-op.
+    const diversity = Math.max(0, Math.min(1, opts.diversity ?? 0));
+    let fusedFinal: number[];
+    if (diversity > 0 && fusedAll.length > 0) {
+      const cosMap = new Map(vec.map((r) => [r.index, r.score]));
+      // Score for DPP relevance: prefer real cosine; FTS-only hits fall back to true cosine.
+      const items: DppItem[] = fusedAll.slice(0, k * 4).map((index) => ({
+        id: index,
+        score: cosMap.get(index) ?? dotF32(q, this.f32[index]),
+        vec: this.f32[index],
+      }));
+      fusedFinal = dppSelect(items, k, 1 - diversity);
+    } else {
+      fusedFinal = fusedAll.slice(0, k);
+    }
+
     const cos = new Map(vec.map((r) => [r.index, r.score]));
-    // FTS-only hit (outside vector top-want) → compute its true cosine, never surface 0
-    return fused.map((index) => ({ ...this.chunks[index], score: cos.get(index) ?? dotF32(q, this.f32[index]) }));
+    const hits = fusedFinal.map((index) => ({
+      ...this.chunks[index],
+      score: cos.get(index) ?? dotF32(q, this.f32[index]),
+    }));
+    return { hits, meta: { intent, weights, diversity } };
   }
 
   // shared facade builder → trace() + reason() use the same view
