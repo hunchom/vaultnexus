@@ -81,6 +81,42 @@ For real semantic quality (recall@3 = 1.000 on the bundled paraphrase eval), poi
 
 ---
 
+## Why VaultNexus?
+
+If you already have an Obsidian vault, you've probably tried other "smart search" approaches. Here's how they compare:
+
+| | VaultNexus | Obsidian core search | Smart Connections plugin | grep / ripgrep |
+|---|---|---|---|---|
+| Semantic (paraphrase) recall | ✅ recall@3=1.000 (eval) | ❌ exact-string only | ✅ | ❌ |
+| Lexical (typo / quoted terms) | ✅ FTS5 BM25 fused via RRF | ✅ | ⚠️ semantic-only | ✅ |
+| Cited byte ranges | ✅ every hit | ⚠️ note-level | ⚠️ note-level | ✅ |
+| Cross-cluster bridges | ✅ Louvain + cosine | ❌ | ❌ | ❌ |
+| Exposed to Claude / MCP clients | ✅ 8 tools | ❌ | ❌ | ❌ |
+| Snapshot persistence (warm start) | ✅ ms | n/a | ⚠️ rebuilds | n/a |
+| API key required | ❌ optional (fake mode works) | ❌ | ✅ OpenAI required | ❌ |
+| Runs offline | ✅ w/ Ollama or fake | ✅ | ❌ | ✅ |
+| Open source | ✅ MIT | proprietary | MIT | various |
+
+**Built for the case where you live in Obsidian + use Claude/MCP daily** and want the same retrieval surface in both places, with citations Claude can click through.
+
+---
+
+## Performance
+
+Numbers from a concurrent-load smoke against a 606-chunk vault, voyage-code-3 embedder, warm cache:
+
+```
+parallel × 30 reqs · wall=26ms · p50=15ms · p95=24ms · 0 failures
+```
+
+- Cold restart (snapshot restore): ~150ms for 600 chunks
+- Cold rebuild from scratch (real embedder, 600 chunks): ~12s on Voyage
+- Warm-cache re-embed (single chunk): ~5ms
+
+The daemon is single-process Node; concurrency is handled by `undici`'s connection pool to the embedder + per-request promises. There is no thread pool to tune.
+
+---
+
 ## Install
 
 > **Requirements** — Node 22+, an Obsidian vault, and (optionally) an OpenAI-compatible embeddings endpoint + key. The bundled `FakeEmbedder` works offline for smoke tests.
