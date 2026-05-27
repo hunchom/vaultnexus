@@ -18,7 +18,7 @@ The daemon does the work — chunking, embedding, hybrid search, the whole pipel
    VAULTNEXUS_VAULT=/path/to/your/vault pnpm dev:daemon
    ```
 
-   Wait for `VAULTNEXUS_READY` on stderr. The daemon listens on loopback port `38473` by default (override via `VAULTNEXUS_HTTP_PORT`).
+   Wait for `VAULTNEXUS_READY` on stderr. The daemon listens on loopback port `38473` by default (override via `VAULTNEXUS_HTTP_PORT` on the daemon side).
 
 2. Build the plugin bundle:
 
@@ -60,10 +60,10 @@ No auth (loopback only), no telemetry, no remote calls — everything stays on `
 
 ## Configuration
 
-- `VAULTNEXUS_HTTP_PORT` — daemon port (default `38473`). The plugin reads `process.env.VAULTNEXUS_HTTP_PORT` at load time; in normal Obsidian use this env var won't be set and the default applies.
+The plugin hard-codes the daemon port to `38473` (the daemon's default). A future settings tab will let you override it via `loadData()` / `saveData()`. Renderer code has no access to environment variables, so launching Obsidian with a custom `VAULTNEXUS_HTTP_PORT` does NOT affect the plugin — set the port symmetrically on both sides only by editing the source for now.
 
 ## Limitations (Plan 29 scaffold)
 
 - Search only. No bridges / reasoning UI yet — the daemon's `/bridges` endpoint exists but the plugin doesn't surface it.
 - Desktop only — loopback HTTP is unavailable on Obsidian mobile.
-- No settings tab — port is wired at plugin load.
+- No settings tab — port is hard-coded at `38473`.
