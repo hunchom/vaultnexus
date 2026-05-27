@@ -5,7 +5,7 @@ import { health } from '../core/health.js';
 import { chatConfigToEnv, selectChatModel } from './select-chat-model.js';
 import type { VaultIndex } from './vault-index.js';
 
-export interface HttpAppDeps { index?: VaultIndex; }
+export interface HttpAppDeps { index?: VaultIndex; embedderId?: string; }
 
 // Body schemas mirror MCP tool surface → keep client surfaces aligned.
 const searchBody = z.object({
@@ -38,6 +38,7 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
     return c.json({
       ...health(),
       indexed: idx ? idx.size : 0,
+      embedder: deps.embedderId ?? 'fake',
       chatModel: idx ? idx.chatModelId() : 'none',
       tools: [
         'vaultnexus_ping','vaultnexus_search','vaultnexus_bridges',

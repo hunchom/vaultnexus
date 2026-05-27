@@ -7,6 +7,7 @@ export class CachingEmbedder implements Embedder {
   constructor(private readonly base: Embedder, private readonly cache: EmbeddingCache, private readonly namespace: string) {}
 
   get dimensions(): number { return this.base.dimensions; }
+  get id(): string { return this.base.id ?? 'unknown'; }
 
   private key(text: string): string {
     const ns = createHash('sha256').update(this.namespace).digest('hex'); // fixed 64-char prefix → boundary unambiguous even with NUL in ns/text

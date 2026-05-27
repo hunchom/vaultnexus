@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const httpListening = new Promise<void>((r) => { httpReady = r; });
   const http: ServerType = serve(
     {
-      fetch: createHttpApp({ index: vaultDir ? index : undefined }).fetch,
+      fetch: createHttpApp({ index: vaultDir ? index : undefined, embedderId: embedder.id ?? 'fake' }).fetch,
       hostname: '127.0.0.1',
       port: httpPort,
     },

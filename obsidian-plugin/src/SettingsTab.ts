@@ -11,6 +11,7 @@ interface DaemonStatus {
   ok: boolean;
   version?: string;
   indexed?: number;
+  embedder?: string;
   chatModel?: string;
   tools?: string[];
   error?: string;
@@ -26,6 +27,9 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
   private idxLampEl!: HTMLSpanElement;
   private idxNumEl!: HTMLDivElement;
   private idxSubEl!: HTMLDivElement;
+  private embLampEl!: HTMLSpanElement;
+  private embNumEl!: HTMLDivElement;
+  private embSubEl!: HTMLDivElement;
   private chatLampEl!: HTMLSpanElement;
   private chatNumEl!: HTMLDivElement;
   private chatSubEl!: HTMLDivElement;
@@ -59,22 +63,24 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
     });
     hero.createDiv({ cls: 'vn-rule vn-rule-strong' });
 
-    // ── Status grid ───────────────────────────────────────
+    // ── Status grid (4 cells) ─────────────────────────────
     const panel = c.createDiv({ cls: 'vn-panel' });
     [
-      { label: 'CONNECTION', refs: ['conn'] },
-      { label: 'INDEX', refs: ['idx'] },
-      { label: 'CHAT MODEL', refs: ['chat'] },
-    ].forEach(({ label, refs }) => {
+      { label: 'CONNECTION', tag: 'conn' },
+      { label: 'INDEX',      tag: 'idx'  },
+      { label: 'EMBEDDER',   tag: 'emb'  },
+      { label: 'CHAT MODEL', tag: 'chat' },
+    ].forEach(({ label, tag }) => {
       const cell = panel.createDiv({ cls: 'vn-cell' });
       const head = cell.createDiv({ cls: 'vn-cell-head' });
       head.createEl('span', { text: label, cls: 'vn-cell-label' });
       const lamp = head.createEl('span', { cls: 'vn-lamp vn-lamp-unknown' });
       const num = cell.createEl('div', { text: '—', cls: 'vn-cell-num' });
       const sub = cell.createEl('div', { text: ' ', cls: 'vn-cell-sub' });
-      if (refs[0] === 'conn') { this.connLampEl = lamp; this.connNumEl = num; this.connSubEl = sub; }
-      if (refs[0] === 'idx')  { this.idxLampEl = lamp;  this.idxNumEl = num;  this.idxSubEl = sub; }
-      if (refs[0] === 'chat') { this.chatLampEl = lamp; this.chatNumEl = num; this.chatSubEl = sub; }
+      if (tag === 'conn') { this.connLampEl = lamp; this.connNumEl = num; this.connSubEl = sub; }
+      if (tag === 'idx')  { this.idxLampEl  = lamp; this.idxNumEl  = num; this.idxSubEl  = sub; }
+      if (tag === 'emb')  { this.embLampEl  = lamp; this.embNumEl  = num; this.embSubEl  = sub; }
+      if (tag === 'chat') { this.chatLampEl = lamp; this.chatNumEl = num; this.chatSubEl = sub; }
     });
 
     this.toolsEl = c.createDiv({ cls: 'vn-tools' });
@@ -106,7 +112,7 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
 
     // ── 02 CHAT MODEL ─────────────────────────────────────
     this.sectionEyebrow(c, '02', 'Chat model',
-      'Powers reason / narrate / recall tools. Fake is an offline stub. Swap to a real provider for narrative answers — pushed live to the daemon (no restart).');
+      'Optional. Powers the reason / narrate / recall tools — search itself never needs a chat model. Default fake is an offline stub. Swap to a real provider for narrative answers — pushed live to the daemon (no restart). (The embedder is a separate concern, configured via VAULTNEXUS_EMBED_* env vars on the daemon process.)');
 
     new Setting(c)
       .setName('Provider')
@@ -303,7 +309,8 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       this.setLamp(this.connLampEl, 'down');
       this.connNumEl.setText('OFFLINE');
       this.connSubEl.setText(st.error ?? base);
-      this.setLamp(this.idxLampEl, 'unknown');  this.idxNumEl.setText('—'); this.idxSubEl.setText(' ');
+      this.setLamp(this.idxLampEl, 'unknown');  this.idxNumEl.setText('—');  this.idxSubEl.setText(' ');
+      this.setLamp(this.embLampEl, 'unknown');  this.embNumEl.setText('—');  this.embSubEl.setText(' ');
       this.setLamp(this.chatLampEl, 'unknown'); this.chatNumEl.setText('—'); this.chatSubEl.setText(' ');
       this.heroVerEl.setText('daemon unreachable');
       new Notice('VaultNexus daemon unreachable. Is it running?');
@@ -320,11 +327,17 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
     this.idxNumEl.setText(this.compactNum(n));
     this.idxSubEl.setText(n === 0 ? 'empty · daemon may still be indexing' : 'chunks · snapshot loaded');
 
+    const em = st.embedder ?? 'fake';
+    const emReal = em !== 'fake' && em !== 'unknown';
+    this.setLamp(this.embLampEl, emReal ? 'ok' : 'warn');
+    this.embNumEl.setText(em);
+    this.embSubEl.setText(emReal ? 'real embeddings · cached on disk' : 'stub · set VAULTNEXUS_EMBED_* on daemon');
+
     const cm = st.chatModel ?? 'fake';
     const real = cm !== 'fake' && cm !== 'none';
     this.setLamp(this.chatLampEl, real ? 'ok' : 'warn');
     this.chatNumEl.setText(real ? cm : 'FAKE');
-    this.chatSubEl.setText(real ? 'real LLM wired' : 'stub · configure under §02');
+    this.chatSubEl.setText(real ? 'real LLM wired' : 'optional · stub unless configured below');
 
     this.toolsEl.empty();
     if (st.tools && st.tools.length > 0) {
@@ -389,12 +402,13 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
       const j = (await r.json()) as {
         status: string; version: string;
-        indexed?: number; chatModel?: string; tools?: string[];
+        indexed?: number; embedder?: string; chatModel?: string; tools?: string[];
       };
       return {
         ok: j.status === 'ok',
         version: j.version,
         indexed: j.indexed,
+        embedder: j.embedder,
         chatModel: j.chatModel,
         tools: j.tools,
       };
@@ -459,11 +473,14 @@ export class VaultNexusSettingsTab extends PluginSettingTab {
       /* ── STATUS GRID ────────────────────────────────── */
       .vaultnexus-settings .vn-panel {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 0;
         margin: 18px 0 0 0;
         border: 1px solid var(--vn-rule);
         border-bottom: none;
+      }
+      @media (max-width: 720px) {
+        .vaultnexus-settings .vn-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       .vaultnexus-settings .vn-cell {
         padding: 12px 14px 14px 14px;

@@ -9,6 +9,7 @@ export class OpenAIEmbedder implements Embedder {
   private _dims = 0;
   constructor(private readonly cfg: OpenAIEmbedderConfig) {}
   get dimensions(): number { return this._dims; }
+  get id(): string { return this.cfg.model; }
 
   async embed(texts: string[]): Promise<Float32Array[]> {
     const res = await request(`${this.cfg.baseURL}/embeddings`, {
