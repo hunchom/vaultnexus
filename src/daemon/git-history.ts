@@ -64,21 +64,29 @@ export async function noteRevisions(
   });
   const sliced = all.slice(0, opts.maxRevisions ?? 50);
   if (!opts.withContent) return sliced;
-  // parallel git-show per revision → annotate content + frontmatterDate
+  // parallel git-show per revision → annotate content + frontmatterDate; pre-rename SHAs may miss notePath → undefined
   const contents = await Promise.all(sliced.map((r) => noteContentAt(repoPath, r.sha, notePath)));
   return sliced.map((r, i) => {
     const content = contents[i];
-    return { ...r, content, frontmatterDate: extractFrontmatterDate(content) };
+    return { ...r, content, frontmatterDate: content ? extractFrontmatterDate(content) : undefined };
   });
 }
 
-/** Note content at `sha`. Throws if `notePath` missing at that ref. */
-export async function noteContentAt(repoPath: string, sha: string, notePath: string): Promise<string> {
-  const { stdout } = await exec(
-    'git',
-    ['-C', repoPath, 'show', `${sha}:${notePath}`],
-    { maxBuffer: MAX_BUF },
-  );
-  return stdout;
+/** Note content at `sha`. `undefined` when `notePath` missing at that ref (e.g. pre-rename SHA). */
+export async function noteContentAt(
+  repoPath: string,
+  sha: string,
+  notePath: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await exec(
+      'git',
+      ['-C', repoPath, 'show', `${sha}:${notePath}`],
+      { maxBuffer: MAX_BUF },
+    );
+    return stdout;
+  } catch {
+    return undefined;
+  }
 }
 

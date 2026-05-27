@@ -118,6 +118,51 @@ describe('git-history edge cases', () => {
     } finally { fx.cleanup(); }
   });
 
+  it('withContent on renamed file returns partial content (pre-rename revisions content undefined, no crash)', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'vn-edge-rename-content-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main', repo]);
+      mkdirSync(join(repo, 'notes'));
+      const env = (d: string): NodeJS.ProcessEnv => ({
+        ...process.env,
+        GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d,
+        GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t',
+      });
+      // c1: notes/a.md = "v1 alpha"
+      writeFileSync(join(repo, 'notes/a.md'), 'v1 alpha\n');
+      execFileSync('git', ['-C', repo, 'add', '.']);
+      execFileSync(
+        'git',
+        ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'add a'],
+        { env: env('2024-01-01T00:00:00Z') },
+      );
+      // c2: git mv notes/a.md notes/b.md (no content change)
+      execFileSync('git', ['-C', repo, 'mv', 'notes/a.md', 'notes/b.md']);
+      execFileSync(
+        'git',
+        ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'rename a→b'],
+        { env: env('2024-02-01T00:00:00Z') },
+      );
+      // c3: modify notes/b.md → "v2 beta"
+      writeFileSync(join(repo, 'notes/b.md'), 'v2 beta\n');
+      execFileSync('git', ['-C', repo, 'add', '.']);
+      execFileSync(
+        'git',
+        ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-m', 'modify b'],
+        { env: env('2024-03-01T00:00:00Z') },
+      );
+      const revs = await noteRevisions(repo, 'notes/b.md', { withContent: true });
+      expect(revs.length).toBe(3);
+      // post-rename revision → content "v2 beta"
+      const hasV2 = revs.some((r) => r.content !== undefined && r.content.includes('v2 beta'));
+      expect(hasV2).toBe(true);
+      // pre-rename revision → git show <sha>:notes/b.md fails → content undefined
+      const hasUndefined = revs.some((r) => r.content === undefined);
+      expect(hasUndefined).toBe(true);
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+
   it('noteRevisions: --follow surfaces history across renames', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'vn-edge-rename-'));
     try {
