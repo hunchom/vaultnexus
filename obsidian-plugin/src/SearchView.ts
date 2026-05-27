@@ -12,14 +12,14 @@ interface SearchHit {
   score: number;
 }
 
-// Health probe cadence → keep loopback chatter minimal but feel live.
+// Loopback chatter minimal; ticks feel live.
 const HEALTH_PROBE_MS = 8000;
 
 export class VaultNexusSearchView extends ItemView {
   private inputEl!: HTMLInputElement;
   private resultsEl!: HTMLDivElement;
   private statusEl!: HTMLDivElement;
-  private connDotEl!: HTMLSpanElement;
+  private connLampEl!: HTMLSpanElement;
   private connTextEl!: HTMLSpanElement;
   private probeTimer?: number;
 
@@ -28,7 +28,7 @@ export class VaultNexusSearchView extends ItemView {
   }
 
   getViewType(): string { return VIEW_TYPE_VAULTNEXUS_SEARCH; }
-  getDisplayText(): string { return 'VaultNexus Search'; }
+  getDisplayText(): string { return 'VaultNexus'; }
   getIcon(): string { return 'search'; }
 
   async onOpen(): Promise<void> {
@@ -37,30 +37,31 @@ export class VaultNexusSearchView extends ItemView {
     root.addClass('vaultnexus-search-view');
     this.injectStyles(root);
 
-    const header = root.createDiv({ cls: 'vn-header' });
-    const title = header.createEl('h4', { text: 'VaultNexus' });
-    title.style.margin = '0 0 0 0';
-    const conn = header.createDiv({ cls: 'vn-conn' });
-    this.connDotEl = conn.createEl('span', { cls: 'vn-conn-dot vn-conn-unknown' });
-    this.connTextEl = conn.createEl('span', { text: 'checking…', cls: 'vn-conn-text' });
+    // Eyebrow + title in editorial style → matches settings tab.
+    const eyebrow = root.createDiv({ cls: 'vn-sv-eyebrow' });
+    eyebrow.createEl('span', { text: 'VAULTNEXUS' });
+    eyebrow.createEl('span', { text: '·', cls: 'vn-sv-sep' });
+    this.connLampEl = eyebrow.createEl('span', { cls: 'vn-sv-lamp vn-sv-lamp-unknown' });
+    this.connTextEl = eyebrow.createEl('span', { text: '…', cls: 'vn-sv-conn-text' });
 
-    const inputWrap = root.createDiv({ cls: 'vn-input-wrap' });
-    const iconEl = inputWrap.createEl('span', { cls: 'vn-input-icon' });
+    root.createEl('h3', { text: 'Semantic search', cls: 'vn-sv-title' });
+    root.createDiv({ cls: 'vn-sv-rule' });
+
+    const inputWrap = root.createDiv({ cls: 'vn-sv-input-wrap' });
+    const iconEl = inputWrap.createEl('span', { cls: 'vn-sv-input-icon' });
     setIcon(iconEl, 'search');
     this.inputEl = inputWrap.createEl('input', {
       type: 'text',
-      placeholder: 'Search vault…',
-      cls: 'vn-input',
+      placeholder: 'query…',
+      cls: 'vn-sv-input',
     });
 
-    this.statusEl = root.createDiv({ cls: 'vn-status' });
-
-    this.resultsEl = root.createDiv({ cls: 'vn-results' });
+    this.statusEl = root.createDiv({ cls: 'vn-sv-status' });
+    this.resultsEl = root.createDiv({ cls: 'vn-sv-results' });
 
     this.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') void this.runSearch();
     });
-
     this.inputEl.focus();
 
     void this.probeHealth();
@@ -77,16 +78,16 @@ export class VaultNexusSearchView extends ItemView {
       const r = await fetch(`http://${s.host}:${s.port}/health`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = (await r.json()) as { status: string; version: string };
-      this.setConn('ok', `daemon v${j.version} @ ${s.host}:${s.port}`);
+      this.setConn('ok', `v${j.version} · ${s.host}:${s.port}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.setConn('down', `unreachable @ ${s.host}:${s.port} (${msg})`);
+      this.setConn('down', `offline · ${s.host}:${s.port} (${msg})`);
     }
   }
 
   private setConn(state: 'ok' | 'down' | 'unknown', text: string): void {
-    this.connDotEl.removeClasses(['vn-conn-ok', 'vn-conn-down', 'vn-conn-unknown']);
-    this.connDotEl.addClass(`vn-conn-${state}`);
+    this.connLampEl.removeClasses(['vn-sv-lamp-ok', 'vn-sv-lamp-down', 'vn-sv-lamp-unknown']);
+    this.connLampEl.addClass(`vn-sv-lamp-${state}`);
     this.connTextEl.setText(text);
   }
 
@@ -95,7 +96,7 @@ export class VaultNexusSearchView extends ItemView {
     if (!q) return;
     const s = this.getSettings();
     this.resultsEl.empty();
-    this.statusEl.setText(`Searching for “${q}”…`);
+    this.statusEl.setText(`◐ searching "${q}"…`);
 
     const t0 = performance.now();
     try {
@@ -112,12 +113,12 @@ export class VaultNexusSearchView extends ItemView {
       }
       const hits = (await res.json()) as SearchHit[];
       const dt = Math.round(performance.now() - t0);
-      this.statusEl.setText(`${hits.length} hit${hits.length === 1 ? '' : 's'} in ${dt} ms`);
+      this.statusEl.setText(`${hits.length} hit${hits.length === 1 ? '' : 's'} · ${dt}ms`);
       if (hits.length === 0) {
         this.renderEmpty(q);
         return;
       }
-      for (const h of hits) this.renderHit(h, s);
+      hits.forEach((h, i) => this.renderHit(h, s, i + 1));
     } catch (err) {
       this.statusEl.setText('');
       const msg = err instanceof Error ? err.message : String(err);
@@ -127,27 +128,29 @@ export class VaultNexusSearchView extends ItemView {
   }
 
   private renderEmpty(q: string): void {
-    const e = this.resultsEl.createDiv({ cls: 'vn-empty' });
-    e.createEl('div', { text: `No matches for “${q}”.` });
+    const e = this.resultsEl.createDiv({ cls: 'vn-sv-empty' });
+    e.createEl('div', { text: `no matches for "${q}"`, cls: 'vn-sv-empty-title' });
     e.createEl('div', {
-      text: 'Try a broader paraphrase, or check the daemon indexed your vault.',
-      cls: 'vn-empty-sub',
+      text: 'Try a broader paraphrase. Check daemon indexed your vault.',
+      cls: 'vn-sv-empty-sub',
     });
   }
 
   private renderError(message: string): void {
-    const e = this.resultsEl.createDiv({ cls: 'vn-error' });
-    e.createEl('div', { text: message });
+    const e = this.resultsEl.createDiv({ cls: 'vn-sv-error' });
+    e.createEl('div', { text: message, cls: 'vn-sv-error-title' });
     e.createEl('div', {
-      text: 'Open Settings → VaultNexus → Test connection for diagnostics.',
-      cls: 'vn-error-sub',
+      text: 'Settings → VaultNexus → Probe for diagnostics.',
+      cls: 'vn-sv-error-sub',
     });
   }
 
-  private renderHit(h: SearchHit, s: VaultNexusSettings): void {
-    const item = this.resultsEl.createDiv({ cls: 'vn-hit' });
+  private renderHit(h: SearchHit, s: VaultNexusSettings, rank: number): void {
+    const item = this.resultsEl.createDiv({ cls: 'vn-sv-hit' });
 
-    const link = item.createEl('a', { text: h.notePath, href: '#', cls: 'vn-hit-link' });
+    const head = item.createDiv({ cls: 'vn-sv-hit-head' });
+    head.createEl('span', { text: String(rank).padStart(2, '0'), cls: 'vn-sv-hit-rank' });
+    const link = head.createEl('a', { text: h.notePath, href: '#', cls: 'vn-sv-hit-link' });
     link.addEventListener('click', (e) => {
       e.preventDefault();
       const linktext = h.headingPath.length
@@ -157,107 +160,165 @@ export class VaultNexusSearchView extends ItemView {
     });
 
     if (s.showHeading && h.headingPath.length > 0) {
-      item.createEl('div', { text: '› ' + h.headingPath.join(' / '), cls: 'vn-hit-heading' });
+      item.createEl('div', { text: '› ' + h.headingPath.join(' / '), cls: 'vn-sv-hit-heading' });
     }
-
     if (s.showPreview && h.text) {
       const txt = h.text.length > s.previewLen ? h.text.slice(0, s.previewLen) + '…' : h.text;
-      item.createEl('div', { text: txt, cls: 'vn-hit-preview' });
+      item.createEl('div', { text: txt, cls: 'vn-sv-hit-preview' });
     }
-
     if (s.showScore && typeof h.score === 'number') {
-      item.createEl('div', { text: `${h.score.toFixed(3)}`, cls: 'vn-hit-score' });
+      item.createEl('div', { text: h.score.toFixed(3), cls: 'vn-sv-hit-score' });
     }
   }
 
   private injectStyles(root: HTMLElement): void {
     const style = root.createEl('style');
     style.textContent = `
-      .vaultnexus-search-view .vn-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin: 0 0 12px 0;
+      .vaultnexus-search-view {
+        --vn-serif: 'Iowan Old Style','Charter','Source Serif Pro','Source Serif 4','Cambria',Georgia,ui-serif,serif;
+        --vn-mono: var(--font-monospace, ui-monospace,'JetBrains Mono','IBM Plex Mono',Menlo,Consolas,monospace);
+        --vn-rule: color-mix(in srgb, var(--text-normal) 22%, transparent);
+        --vn-accent: var(--interactive-accent);
+        --vn-ok: #2ea043; --vn-down: #d05656;
+        padding: 4px 2px;
       }
-      .vaultnexus-search-view .vn-conn {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 0.75em;
+      .vaultnexus-search-view .vn-sv-eyebrow {
+        display: flex; align-items: center; gap: 6px;
+        font-family: var(--vn-mono);
+        font-size: 0.66em;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
         color: var(--text-muted);
       }
-      .vaultnexus-search-view .vn-conn-dot {
+      .vaultnexus-search-view .vn-sv-sep { opacity: 0.5; }
+      .vaultnexus-search-view .vn-sv-lamp {
+        width: 7px; height: 7px; border-radius: 50%;
         display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
         background: var(--text-faint);
       }
-      .vaultnexus-search-view .vn-conn-ok       { background: var(--color-green, #2ea043); }
-      .vaultnexus-search-view .vn-conn-down     { background: var(--color-red,   #d05656); }
-      .vaultnexus-search-view .vn-conn-unknown  { background: var(--text-faint); }
-      .vaultnexus-search-view .vn-input-wrap {
-        position: relative;
-        margin-bottom: 8px;
+      .vaultnexus-search-view .vn-sv-lamp-ok      { background: var(--vn-ok);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--vn-ok) 60%, transparent); }
+      .vaultnexus-search-view .vn-sv-lamp-down    { background: var(--vn-down);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--vn-down) 60%, transparent); }
+      .vaultnexus-search-view .vn-sv-lamp-unknown { background: var(--text-faint); }
+      .vaultnexus-search-view .vn-sv-conn-text {
+        font-family: var(--vn-mono);
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--text-muted);
       }
-      .vaultnexus-search-view .vn-input-icon {
-        position: absolute;
-        left: 8px;
-        top: 50%;
+      .vaultnexus-search-view .vn-sv-title {
+        font-family: var(--vn-serif);
+        font-style: italic;
+        font-weight: 500;
+        font-size: 1.35em;
+        margin: 4px 0 8px 0;
+        letter-spacing: -0.005em;
+      }
+      .vaultnexus-search-view .vn-sv-rule {
+        height: 1px; background: var(--vn-rule); margin: 0 0 12px 0;
+      }
+      .vaultnexus-search-view .vn-sv-input-wrap {
+        position: relative;
+        margin-bottom: 10px;
+      }
+      .vaultnexus-search-view .vn-sv-input-icon {
+        position: absolute; left: 2px; top: 50%;
         transform: translateY(-50%);
         color: var(--text-muted);
-        display: inline-flex;
         pointer-events: none;
+        display: inline-flex;
       }
-      .vaultnexus-search-view .vn-input {
+      .vaultnexus-search-view .vn-sv-input {
         width: 100%;
-        padding-left: 30px;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--vn-rule);
+        border-radius: 0;
+        padding: 6px 4px 6px 24px;
+        font-family: var(--vn-mono);
+        font-size: 0.95em;
+        color: var(--text-normal);
+        box-shadow: none;
       }
-      .vaultnexus-search-view .vn-status {
-        font-size: 0.75em;
+      .vaultnexus-search-view .vn-sv-input:focus {
+        outline: none;
+        border-bottom: 1px solid var(--vn-accent);
+        box-shadow: none;
+      }
+      .vaultnexus-search-view .vn-sv-status {
+        font-family: var(--vn-mono);
+        font-size: 0.72em;
+        letter-spacing: 0.06em;
         color: var(--text-muted);
         min-height: 1.2em;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
       }
-      .vaultnexus-search-view .vn-hit {
-        padding: 8px 0;
-        border-bottom: 1px solid var(--background-modifier-border);
+      .vaultnexus-search-view .vn-sv-hit {
+        padding: 10px 0;
+        border-top: 1px dashed var(--vn-rule);
       }
-      .vaultnexus-search-view .vn-hit-link {
-        font-weight: 600;
-        cursor: pointer;
+      .vaultnexus-search-view .vn-sv-hit:first-child { border-top: none; }
+      .vaultnexus-search-view .vn-sv-hit-head {
+        display: flex; align-items: baseline; gap: 8px;
       }
-      .vaultnexus-search-view .vn-hit-heading {
-        margin-top: 2px;
-        font-size: 0.82em;
-        color: var(--text-muted);
-      }
-      .vaultnexus-search-view .vn-hit-preview {
-        margin-top: 4px;
-        font-size: 0.85em;
-        color: var(--text-normal);
-        line-height: 1.4;
-      }
-      .vaultnexus-search-view .vn-hit-score {
-        margin-top: 3px;
+      .vaultnexus-search-view .vn-sv-hit-rank {
+        font-family: var(--vn-mono);
+        font-variant-numeric: tabular-nums;
         font-size: 0.72em;
-        font-family: var(--font-monospace);
-        color: var(--text-faint);
+        color: var(--vn-accent);
+        font-weight: 600;
       }
-      .vaultnexus-search-view .vn-empty,
-      .vaultnexus-search-view .vn-error {
-        padding: 16px 8px;
-        text-align: center;
-        border: 1px dashed var(--background-modifier-border);
-        border-radius: 6px;
+      .vaultnexus-search-view .vn-sv-hit-link {
+        font-family: var(--vn-serif);
+        font-style: italic;
+        font-size: 1.02em;
+        font-weight: 500;
+        cursor: pointer;
+        color: var(--text-normal);
+      }
+      .vaultnexus-search-view .vn-sv-hit-link:hover {
+        color: var(--vn-accent);
+      }
+      .vaultnexus-search-view .vn-sv-hit-heading {
+        margin: 3px 0 0 26px;
+        font-family: var(--vn-mono);
+        font-size: 0.74em;
         color: var(--text-muted);
+        letter-spacing: 0.02em;
       }
-      .vaultnexus-search-view .vn-error { border-color: var(--color-red, #d05656); }
-      .vaultnexus-search-view .vn-empty-sub,
-      .vaultnexus-search-view .vn-error-sub {
-        margin-top: 4px;
-        font-size: 0.8em;
+      .vaultnexus-search-view .vn-sv-hit-preview {
+        margin: 6px 0 0 26px;
+        font-size: 0.86em;
+        color: var(--text-normal);
+        line-height: 1.5;
+      }
+      .vaultnexus-search-view .vn-sv-hit-score {
+        margin: 4px 0 0 26px;
+        font-family: var(--vn-mono);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.7em;
         color: var(--text-faint);
+        letter-spacing: 0.04em;
+      }
+      .vaultnexus-search-view .vn-sv-empty,
+      .vaultnexus-search-view .vn-sv-error {
+        padding: 18px 12px;
+        text-align: center;
+        border: 1px dashed var(--vn-rule);
+        color: var(--text-muted);
+        font-family: var(--vn-mono);
+        font-size: 0.84em;
+      }
+      .vaultnexus-search-view .vn-sv-error { border-color: color-mix(in srgb, var(--vn-down) 50%, transparent); }
+      .vaultnexus-search-view .vn-sv-empty-title,
+      .vaultnexus-search-view .vn-sv-error-title { font-weight: 600; color: var(--text-normal); }
+      .vaultnexus-search-view .vn-sv-empty-sub,
+      .vaultnexus-search-view .vn-sv-error-sub {
+        margin-top: 6px;
+        font-size: 0.84em;
+        color: var(--text-faint);
+        font-family: var(--vn-mono);
       }
     `;
   }
