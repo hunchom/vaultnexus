@@ -11,6 +11,7 @@ import { traceReasoning, type ReasonHop, type TraceFacade, type TraceOptions } f
 import { noteRevisions, type HistoryOptions, type Revision } from './git-history.js';
 import type { ChatModel, ChatComposeOpts } from '../core/chat-model.js';
 import { composeAnswer } from './reason-compose.js';
+import { narrateRecallHistory, type NarrateOptions } from './recall-narrate.js';
 
 export interface IndexedChunk {
   notePath: string;
@@ -179,6 +180,26 @@ export class VaultIndex {
   async history(notePath: string, opts: HistoryOptions = {}): Promise<Revision[]> {
     if (!this.vaultPath) return [];
     return noteRevisions(this.vaultPath, notePath, opts);
+  }
+
+  /** Stance-shift narration over the note's git timeline. Throws when no ChatModel injected. */
+  async narrateHistory(
+    notePath: string,
+    opts: NarrateOptions = {},
+  ): Promise<{ narration: string; revisions: Revision[] }> {
+    if (!this.chatModel) {
+      throw new Error(
+        'narrateHistory() requires a ChatModel — pass via new VaultIndex(embedder, vaultPath, chatModel)',
+      );
+    }
+    if (!this.vaultPath) {
+      // no vault root → no git history to walk
+      return {
+        narration: 'Note has fewer than two revisions; no stance shift to narrate.',
+        revisions: [],
+      };
+    }
+    return narrateRecallHistory(this.vaultPath, this.chatModel, notePath, opts);
   }
 
   /** Release native FTS db handle. */
