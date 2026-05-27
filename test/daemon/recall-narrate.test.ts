@@ -96,6 +96,58 @@ describe('narrateRecallHistory (orchestrator)', () => {
     expect(res.narration).toContain('[fake-compose]');
     expect(res.revisions.length).toBe(3);
   });
+
+  it('mixed valid + fabricated SHA → invalidShaCitations isolates the fabricated', async () => {
+    // pull real shas first → build narration referencing one real prefix + one fake
+    const realRevsNewestFirst = execFileSync(
+      'git',
+      ['-C', vaultPath, 'log', '--follow', '--pretty=format:%H', '--', 'notes/productivity/gtd-effectiveness.md'],
+      { encoding: 'utf8' },
+    ).trim().split('\n');
+    const realShortPrefix = realRevsNewestFirst[0].slice(0, 7);
+    const fakeNarration = `Started [sha:${realShortPrefix} @ 2024-03-15] then [sha:badbeef @ 2024-10-22]`;
+    const inline: ChatModel = {
+      id: 'inline',
+      async compose() { return fakeNarration; },
+    };
+    const res = await narrateRecallHistory(
+      vaultPath,
+      inline,
+      'notes/productivity/gtd-effectiveness.md',
+    );
+    expect(res.narration).toBe(fakeNarration);
+    expect(res.invalidShaCitations).toEqual(['[sha:badbeef @ 2024-10-22]']);
+  });
+
+  it('all-valid SHAs → invalidShaCitations is empty', async () => {
+    const realRevsNewestFirst = execFileSync(
+      'git',
+      ['-C', vaultPath, 'log', '--follow', '--pretty=format:%H', '--', 'notes/productivity/gtd-effectiveness.md'],
+      { encoding: 'utf8' },
+    ).trim().split('\n');
+    const a = realRevsNewestFirst[0].slice(0, 7);
+    const b = realRevsNewestFirst[1].slice(0, 7);
+    const inline: ChatModel = {
+      id: 'inline',
+      async compose() { return `[sha:${a} @ 2024-03-15] then [sha:${b} @ 2024-06-10]`; },
+    };
+    const res = await narrateRecallHistory(
+      vaultPath,
+      inline,
+      'notes/productivity/gtd-effectiveness.md',
+    );
+    expect(res.invalidShaCitations).toEqual([]);
+  });
+
+  it('< 2 revisions fallback → invalidShaCitations is empty', async () => {
+    const res = await narrateRecallHistory(
+      vaultPath,
+      new FakeChatModel(),
+      'notes/productivity/gtd-overview.md',
+    );
+    expect(res.narration.startsWith('Note has fewer than two')).toBe(true);
+    expect(res.invalidShaCitations).toEqual([]);
+  });
 });
 
 describe('VaultIndex.narrateHistory', () => {
@@ -130,5 +182,12 @@ describe('VaultIndex.narrateHistory', () => {
     const res = await idx.narrateHistory('notes/productivity/gtd-overview.md');
     expect(res.narration.startsWith('Note has fewer than two')).toBe(true);
     expect(res.revisions.length).toBe(1);
+    expect(res.invalidShaCitations).toEqual([]);
+  });
+
+  it('FakeChatModel (no SHA markers in output) → invalidShaCitations empty', async () => {
+    const idx = await buildSeededIndex(vaultPath, new FakeChatModel());
+    const res = await idx.narrateHistory('notes/productivity/gtd-effectiveness.md');
+    expect(res.invalidShaCitations).toEqual([]);
   });
 });
