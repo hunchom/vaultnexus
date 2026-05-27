@@ -18,6 +18,7 @@
     "dev:bridge": "tsx src/bridge/main.ts",
     "eval": "tsx src/eval/run.ts",
     "eval:seeded": "tsx src/eval/seeded-run.ts",
+    "eval:router": "tsx src/eval/router-eval.ts",
     "seed:demo": "tsx scripts/seed-demo-vault.ts",
     "drift": "tsx src/eval/drift-check.ts",
     "drift:perturb": "tsx src/eval/lexicon-perturb-check.ts",

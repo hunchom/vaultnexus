@@ -108,6 +108,10 @@ export interface RunOptions {
   ftsOnly?: boolean;
   /** Vector + FTS fetch breadth + recall@k cut. Default 10. */
   k?: number;
+  /** Plan 25: route query intent → dynamic fusion weights. */
+  router?: boolean;
+  /** Plan 25: DPP rerank λ-mix, 0..1. */
+  diversity?: number;
 }
 
 /** Multi-target hit: any target appears in top-k → counts as recall=1 for that query.
@@ -143,7 +147,11 @@ export async function runSeededEval(
 
   const perQuery: SeededPerQuery[] = [];
   for (const q of queries) {
-    const hits = await idx.query(q.query, k * 4); // over-fetch chunks → dedupe to notes
+    // Plan 25: optional router/diversity flow through to VaultIndex.query.
+    const hits = await idx.query(q.query, k * 4, {
+      router: opts.router,
+      diversity: opts.diversity,
+    });
     const ranked = rankedNotes(hits);
     const tgt = new Set(q.targets);
     perQuery.push({
