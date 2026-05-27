@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VaultIndex, type IndexedChunk, type SearchHit } from '../../src/daemon/vault-index.js';
 import { FakeEmbedder } from '../../src/core/embedder.js';
-import { traceReasoning, type TraceFacade } from '../../src/daemon/reason-trace.js';
+import { traceReasoning, type ReasonHop, type TraceFacade } from '../../src/daemon/reason-trace.js';
 
 /** Build a facade backed by a real VaultIndex (the unit under test is traceReasoning, not the index). */
 async function facadeOver(idx: VaultIndex): Promise<TraceFacade> {
@@ -67,6 +67,23 @@ describe('traceReasoning — kNN cross-note BFS (maxDepth: 1)', () => {
     expect(reached).toBeDefined();
     expect(reached!.step).toBe(1);
     expect(reached!.score).toBeGreaterThanOrEqual(0.3);
+  });
+});
+
+describe('VaultIndex.trace() integration', () => {
+  it('returns hops over a 3-note vault, monotonic step, every chunk bound by index.size', async () => {
+    const idx = new VaultIndex(new FakeEmbedder(64));
+    await idx.addNote('A.md', '# A\n\nthe central topic of inquiry\n\nbody filler a\n');
+    await idx.addNote('B.md', '# B\n\nrelated to [[A]] in spirit\n\nbody filler b\n');
+    await idx.addNote('C.md', '# C\n\nthe central topic of inquiry restated\n\nbody filler c\n');
+    const hops = await idx.trace('the central topic of inquiry', { maxDepth: 1, kSeeds: 2 });
+    expect(hops.length).toBeGreaterThan(0);
+    for (const h of hops) {
+      expect(h.toChunkId).toBeGreaterThanOrEqual(0);
+      expect(h.toChunkId).toBeLessThan(idx.size);
+    }
+    const steps = hops.map((h: ReasonHop) => h.step);
+    for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeGreaterThanOrEqual(steps[i - 1]);
   });
 });
 
