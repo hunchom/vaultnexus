@@ -1,0 +1,48 @@
+# VaultNexus daemon + (optional) local Ollama for offline embeddings.
+#
+# Start:    docker compose up -d
+# Logs:     docker compose logs -f vaultnexus
+# Stop:     docker compose down
+#
+# Edit VAULT_PATH below to point at your vault.
+
+services:
+  vaultnexus:
+    build: .
+    image: vaultnexus:latest
+    container_name: vaultnexus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:38473:38473"   # loopback-only on host
+    volumes:
+      - ${VAULT_PATH:-./demo-vault-seeded}:/vault:ro
+      - vaultnexus-state:/var/lib/vaultnexus
+    environment:
+      VAULTNEXUS_VAULT: /vault
+      # Wire any OpenAI-compatible endpoint here. Defaults below assume the
+      # ollama service below is running.
+      VAULTNEXUS_EMBED_URL: http://ollama:11434/v1
+      VAULTNEXUS_EMBED_KEY: ollama
+      VAULTNEXUS_EMBED_MODEL: nomic-embed-text
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  # Optional: local embedding server. Skip if pointing VAULTNEXUS_EMBED_URL at
+  # Voyage / OpenAI / your own provider.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: vaultnexus-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # First-time setup: `docker compose exec ollama ollama pull nomic-embed-text`
+
+volumes:
+  vaultnexus-state:
+  ollama-models:

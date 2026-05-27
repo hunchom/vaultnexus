@@ -202,6 +202,25 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 A full step-by-step is in **[Getting started →](docs/GETTING_STARTED.md)**.
 
+### Docker
+
+```bash
+# One-shot — bind-mount your vault, point at Voyage:
+docker run --rm -it \
+  -v "$HOME/Documents/MyVault:/vault:ro" \
+  -v vaultnexus-state:/var/lib/vaultnexus \
+  -e VAULTNEXUS_VAULT=/vault \
+  -e VAULTNEXUS_EMBED_URL=https://api.voyageai.com/v1 \
+  -e VAULTNEXUS_EMBED_KEY=$VOYAGE_API_KEY \
+  -e VAULTNEXUS_EMBED_MODEL=voyage-3-large \
+  -p 127.0.0.1:38473:38473 \
+  $(docker build -q .)
+
+# Or docker-compose w/ bundled Ollama for offline embeddings:
+VAULT_PATH="$HOME/Documents/MyVault" docker compose up -d
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
 ---
 
 ## MCP tools
