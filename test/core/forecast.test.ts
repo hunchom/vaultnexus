@@ -21,11 +21,12 @@ describe('parseForecast', () => {
       '# body',
     ].join('\n');
     const got = parseForecast(src, 'notes/x.md');
+    // YAML date scalars → Date → full ISO (consistent shape across all timestamps)
     expect(got).toEqual({
       notePath: 'notes/x.md',
       claim: 'X happens',
-      by: '2027-01-01',
-      markedAt: '2024-11-01',
+      by: '2027-01-01T00:00:00.000Z',
+      markedAt: '2024-11-01T00:00:00.000Z',
       probability: 0.5,
     });
   });
@@ -84,6 +85,81 @@ describe('parseForecast', () => {
     expect(got!.claim.startsWith('By end of 2027')).toBe(true);
     expect(got!.probability).toBe(0.5);
   });
+
+  // probability bounds — invalid types/values → default 0.5 (max uncertainty)
+  describe('probability bounds → defaults to 0.5', () => {
+    const base = (probLine: string) =>
+      [
+        '---',
+        'forecast:',
+        '  claim: "X"',
+        '  by: 2027-01-01',
+        '  marked_at: 2024-11-01',
+        `  probability: ${probLine}`,
+        '---',
+      ].join('\n');
+
+    it.each([
+      ['null', 'null'],
+      ['string ("high")', '"high"'],
+      ['negative (-0.2)', '-0.2'],
+      ['above 1 (1.5)', '1.5'],
+      ['NaN (.nan)', '.nan'],
+    ])('%s → 0.5', (_label, yamlVal) => {
+      const got = parseForecast(base(yamlVal), 'a.md');
+      expect(got?.probability).toBe(0.5);
+    });
+  });
+
+  it('extra frontmatter keys (tags, confidence) parse cleanly', () => {
+    const src = [
+      '---',
+      'tags: [foo, bar]',
+      'confidence: high',
+      'forecast:',
+      '  claim: "Z"',
+      '  by: 2027-01-01',
+      '  marked_at: 2024-11-01',
+      '  probability: 0.7',
+      '---',
+      '',
+      'body',
+    ].join('\n');
+    const got = parseForecast(src, 'a.md');
+    expect(got).toEqual({
+      notePath: 'a.md',
+      claim: 'Z',
+      by: '2027-01-01T00:00:00.000Z',
+      markedAt: '2024-11-01T00:00:00.000Z',
+      probability: 0.7,
+    });
+  });
+
+  it('empty claim ("") → undefined', () => {
+    const src = [
+      '---',
+      'forecast:',
+      '  claim: ""',
+      '  by: 2027-01-01',
+      '  marked_at: 2024-11-01',
+      '---',
+    ].join('\n');
+    expect(parseForecast(src, 'a.md')).toBeUndefined();
+  });
+
+  it('YAML date scalar → full ISO timestamp (not date-only)', () => {
+    // YAML '2027-12-31' → Date → '2027-12-31T00:00:00.000Z' (full ISO)
+    const src = [
+      '---',
+      'forecast:',
+      '  claim: "X"',
+      '  by: 2027-12-31',
+      '  marked_at: 2024-11-01',
+      '---',
+    ].join('\n');
+    const got = parseForecast(src, 'a.md');
+    expect(got?.by).toBe('2027-12-31T00:00:00.000Z');
+  });
 });
 
 describe('parseResolved', () => {
@@ -99,7 +175,7 @@ describe('parseResolved', () => {
       '  resolved_at: 2024-12-01',
       '---',
     ].join('\n');
-    expect(parseResolved(src)).toEqual({ outcome: true, resolvedAt: '2024-12-01' });
+    expect(parseResolved(src)).toEqual({ outcome: true, resolvedAt: '2024-12-01T00:00:00.000Z' });
   });
 
   it('no resolved key → undefined', () => {

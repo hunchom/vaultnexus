@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { relative } from 'node:path';
+import matter from 'gray-matter';
 import { walkMarkdown } from './indexer.js';
 import {
-  parseForecast,
-  parseResolved,
+  parseForecastFromData,
+  parseResolvedFromData,
   brierScore,
   type Forecast,
   type ResolvedForecast,
@@ -17,6 +18,7 @@ export interface ForecastLedger {
 
 // Walk every .md → partition by resolved-frontmatter presence → score.
 // notePath = vault-relative (matches addNote() convention).
+// One matter() per note → both helpers reuse parsed data (halves YAML cost vs prior 2× call).
 export async function scanVaultForecasts(vaultPath: string): Promise<ForecastLedger> {
   const files = await walkMarkdown(vaultPath);
   const pending: Forecast[] = [];
@@ -24,9 +26,15 @@ export async function scanVaultForecasts(vaultPath: string): Promise<ForecastLed
   for (const abs of files) {
     const src = await readFile(abs, 'utf8');
     const notePath = relative(vaultPath, abs);
-    const fc = parseForecast(src, notePath);
+    let data: Record<string, unknown>;
+    try {
+      data = (matter(src).data ?? {}) as Record<string, unknown>;
+    } catch {
+      continue; // unparseable YAML → skip note
+    }
+    const fc = parseForecastFromData(data, notePath);
     if (!fc) continue;
-    const res = parseResolved(src);
+    const res = parseResolvedFromData(data);
     if (res) resolved.push({ ...fc, outcome: res.outcome, resolvedAt: res.resolvedAt });
     else pending.push(fc);
   }

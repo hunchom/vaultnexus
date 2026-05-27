@@ -93,4 +93,30 @@ describe('validateShaCitations', () => {
     const { valid } = validateShaCitations(cs, revs);
     expect(valid.length).toBe(1);
   });
+
+  it('ambiguous prefix (2+ revisions share it) → invalid', () => {
+    // two revs share the prefix 'abc1234' → cannot disambiguate
+    const revs = [
+      rev('abc1234deadbeef0000000000000000000000000'),
+      rev('abc1234cafebabe1111111111111111111111111'),
+    ];
+    const cs = extractShaCitations('[sha:abc1234 @ 2024-03-15]');
+    const { valid, invalid } = validateShaCitations(cs, revs);
+    expect(valid).toEqual([]);
+    expect(invalid.length).toBe(1);
+    expect(invalid[0].sha).toBe('abc1234');
+  });
+
+  it('degenerate short prefix (all same hex char) → ambiguous → invalid', () => {
+    // model emits '[sha:aaaaaaa @ ...]' → matches multiple unrelated SHAs starting w/ 'a'
+    const revs = [
+      rev('aaaaaaa1111111111111111111111111111111aa'),
+      rev('aaaaaaa2222222222222222222222222222222aa'),
+      rev('bbbbbbb0000000000000000000000000000000bb'),
+    ];
+    const cs = extractShaCitations('[sha:aaaaaaa @ 2024-03-15]');
+    const { valid, invalid } = validateShaCitations(cs, revs);
+    expect(valid).toEqual([]);
+    expect(invalid.length).toBe(1);
+  });
 });

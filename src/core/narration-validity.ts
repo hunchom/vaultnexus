@@ -19,17 +19,22 @@ export function extractShaCitations(text: string): ShaCitation[] {
   return out;
 }
 
-/** Splits `citations` by SHA-prefix match against any revision. Model emits short SHA → revision has full. */
+/**
+ * Splits `citations` by UNIQUE SHA-prefix match against revisions.
+ * Model emits short SHA → revision has full.
+ * 0 matches → invalid (not found). 2+ matches → invalid (ambiguous prefix; e.g. degenerate `[sha:aaaaaaa @ ...]`).
+ * Exactly 1 match → valid.
+ */
 export function validateShaCitations(
   citations: ShaCitation[],
   revisions: Revision[],
 ): { valid: ShaCitation[]; invalid: ShaCitation[] } {
-  const shas = revisions.map((r) => r.sha);
   const valid: ShaCitation[] = [];
   const invalid: ShaCitation[] = [];
   for (const c of citations) {
-    const hit = shas.some((s) => s.startsWith(c.sha));
-    (hit ? valid : invalid).push(c);
+    const matches = revisions.filter((r) => r.sha.startsWith(c.sha));
+    if (matches.length === 1) valid.push(c);
+    else invalid.push(c); // 0 = not found, 2+ = ambiguous prefix
   }
   return { valid, invalid };
 }
