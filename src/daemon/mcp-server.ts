@@ -69,7 +69,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
       'vaultnexus_reason',
       {
         description:
-          'Cited natural-language answer over the vault. Composes via LLM on top of the citation chain (vaultnexus_trace). Every claim cites [ref:notePath:byteStart-byteEnd] from the chain; unsupported claims are dropped, never invented. Returns { answer, hops, model } — model id is reported for transparency.',
+          'Cited natural-language answer over the vault. Composes via LLM on top of the citation chain (vaultnexus_trace). Every claim cites [ref:notePath:byteStart-byteEnd] from the chain; unsupported claims are dropped, never invented. Returns { answer, hops, model, invalidCitations } — invalidCitations lists raw [ref:...] markers the model produced that do not match any hop (empty array when clean).',
         inputSchema: {
           question: z.string(),
           maxDepth: z.number().int().nonnegative().optional(),
