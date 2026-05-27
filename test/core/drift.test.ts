@@ -52,6 +52,27 @@ describe('conviction', () => {
     // 'kind' alone is not in lexicon; only the 'kind of' phrase counts
     expect(conviction('kind people')).toBe(0);
   });
+
+  // Plan 21 — lexicon override wired through; defaults preserve v1 behavior
+  it('omitted lexicon args → identical to default (regression on v1)', () => {
+    const text = 'this is clearly essential but maybe also kind of wrong';
+    expect(conviction(text)).toBe(conviction(text, undefined as never, undefined as never));
+  });
+
+  it('custom lexicon → different score on same text', () => {
+    const text = 'this is clearly essential and never doubted';
+    const baseline = conviction(text);
+    // empty lexicons → zero matches → score 0 regardless of text content
+    const empty = conviction(text, [], []);
+    expect(empty).toBe(0);
+    expect(empty).not.toBe(baseline);
+  });
+
+  it('custom hedge-only lexicon → only hedges counted', () => {
+    // text has 1 'never' (assertion in v1) + 1 'maybe' (hedge in v1), 3 words total
+    // override: hedge=['never'], assertion=[] → 1 hedge, 0 assertion → -1/3
+    expect(conviction('never maybe okay', ['never'], [])).toBeCloseTo(-1 / 3, 5);
+  });
 });
 
 describe('convictionSlope', () => {
