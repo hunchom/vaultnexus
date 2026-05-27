@@ -69,6 +69,7 @@ describe('traceReasoning — edge cases', () => {
     expect(hops.length).toBeLessThanOrEqual(cap);
   });
 
+  // determinism: same-instance two-call equality (FakeEmbedder = FNV deterministic → independent-build determinism follows but not asserted here)
   it('deterministic: two runs with same inputs deep-equal', async () => {
     const idx = new VaultIndex(new FakeEmbedder(64));
     await idx.addNote('A.md', '# A\n\nthe central topic\n\nlink to [[B]]\n');
