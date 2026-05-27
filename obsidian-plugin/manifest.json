@@ -1,0 +1,9 @@
+{
+  "id": "vaultnexus",
+  "name": "VaultNexus",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Semantic search and hidden-bridge discovery over your vault, served by the VaultNexus daemon on 127.0.0.1.",
+  "author": "Roger French",
+  "isDesktopOnly": true
+}

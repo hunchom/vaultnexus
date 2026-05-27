@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) => socketServer.listen(socketPath, resolve));
 
   const http: ServerType = serve({
-    fetch: createHttpApp().fetch,
+    fetch: createHttpApp({ index: vaultDir ? index : undefined }).fetch,
     hostname: '127.0.0.1',
     port: httpPort,
   });
