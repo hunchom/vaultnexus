@@ -18,9 +18,9 @@
       "command": "node",
       "args": ["${__dirname}/server/dist/bridge/main.js"],
       "env": {
-        "VAULTNEXUS_VAULT_PATH": "${user_config.vault_path}",
+        "VAULTNEXUS_VAULT": "${user_config.vault_path}",
         "VAULTNEXUS_CHAT_PROVIDER": "${user_config.chat_provider}",
-        "VAULTNEXUS_CHAT_API_KEY": "${user_config.chat_api_key}"
+        "VAULTNEXUS_CHAT_KEY": "${user_config.chat_api_key}"
       }
     }
   },
@@ -34,21 +34,22 @@
     "chat_provider": {
       "type": "string",
       "title": "Chat Provider (optional)",
-      "description": "LLM provider for cited reasoning: 'anthropic', 'openai', or empty to disable",
+      "description": "LLM provider for cited reasoning: 'anthropic', 'openai', or empty to disable. NOTE: user_config currently sets env on the bridge process only; the daemon (started out-of-band per docs/MCPB.md) must inherit the same env vars from your shell until auto-spawn lands.",
       "required": false,
       "default": ""
     },
     "chat_api_key": {
       "type": "string",
       "title": "Chat API Key (optional)",
-      "description": "API key for the selected chat provider; leave empty to disable reasoning",
+      "description": "API key for the selected chat provider; leave empty to disable reasoning. NOTE: this is read by the daemon, not the bridge — export VAULTNEXUS_CHAT_KEY in the shell that starts the daemon.",
       "required": false,
       "sensitive": true,
       "default": ""
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "linux", "win32"],
+    "platforms": ["darwin"],
+    "architectures": ["arm64"],
     "runtimes": {
       "node": ">=22.0.0"
     }
