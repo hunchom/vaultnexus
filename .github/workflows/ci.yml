@@ -31,8 +31,14 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
 
-      - name: install
+      - name: install (root)
         run: pnpm install --frozen-lockfile
+
+      - name: install (obsidian-plugin)
+        # The plugin uses workspace-isolated deps so the build-smoke test in
+        # test/obsidian-plugin/build.test.ts can resolve esbuild.
+        working-directory: obsidian-plugin
+        run: pnpm install --ignore-workspace --no-frozen-lockfile
 
       - name: typecheck
         run: pnpm run typecheck
