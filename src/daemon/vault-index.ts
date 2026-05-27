@@ -64,12 +64,17 @@ export class VaultIndex {
   constructor(
     private readonly embedder: Embedder,
     private readonly vaultPath?: string,
-    private readonly chatModel?: ChatModel,
+    private chatModel?: ChatModel,
   ) {}
 
   /** Inject a snapshot store → subsequent addNote() persists chunks + meta. Plan 26. */
   attachSnapshot(snapshot: IndexSnapshot): void {
     this.snapshot = snapshot;
+  }
+
+  /** Hot-swap chat model. Plugin /configure-chat → no daemon restart. */
+  setChatModel(next: ChatModel): void {
+    this.chatModel = next;
   }
 
   /** Chat model id for transparency (returned in vaultnexus_reason). 'none' when unset. */

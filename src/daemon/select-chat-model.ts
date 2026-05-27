@@ -8,6 +8,24 @@ import {
 
 type Env = Record<string, string | undefined>;
 
+/** Plugin /configure-chat payload → temporary Env map for selectChatModel. */
+export interface ChatConfig {
+  provider?: 'fake' | 'anthropic' | 'openai' | 'openai-compatible';
+  key?: string;
+  model?: string;
+  baseURL?: string;
+}
+
+/** Translate ChatConfig → Env-shape map. Empty fields stay undefined → selectChatModel throws as usual. */
+export function chatConfigToEnv(cfg: ChatConfig): Env {
+  return {
+    VAULTNEXUS_CHAT_PROVIDER: cfg.provider,
+    VAULTNEXUS_CHAT_KEY: cfg.key,
+    VAULTNEXUS_CHAT_MODEL: cfg.model,
+    VAULTNEXUS_CHAT_URL: cfg.baseURL,
+  };
+}
+
 /** Pick chat model from env. default → FakeChatModel. Explicit provider w/o required envs → throw. */
 export function selectChatModel(env: Env = process.env): ChatModel {
   const provider = env.VAULTNEXUS_CHAT_PROVIDER ?? 'fake';
