@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { z } from 'zod';
 import { health } from '../core/health.js';
 import type { VaultIndex } from './vault-index.js';
@@ -19,6 +20,9 @@ const bridgesBody = z.object({
 /** Loopback HTTP surface for the Obsidian plugin. /health always; /search + /bridges when index injected. */
 export function createHttpApp(deps: HttpAppDeps = {}): Hono {
   const app = new Hono();
+  // Obsidian renderer (Electron app://) + browser clients on localhost issue cross-origin → allow all.
+  // Loopback-only bind keeps the surface single-host; CORS just unblocks the browser-side preflight.
+  app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['content-type'] }));
   app.get('/health', (c) => c.json(health()));
 
   // GET /status → richer diagnostic (index size, chat-model id) for the plugin settings tab.
