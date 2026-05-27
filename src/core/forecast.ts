@@ -20,10 +20,11 @@ interface ResolvedRaw {
   resolvedAt: string;
 }
 
-// YAML date values → Date objects via gray-matter; everything else stringifies cleanly
+// All emitted timestamps (by / markedAt / resolvedAt) → full ISO via toISOString().
+// YAML date scalar '2027-12-31' → Date object → '2027-12-31T00:00:00.000Z'. String → verbatim. Number → str.
 function toIsoLike(v: unknown): string | undefined {
   if (v === undefined || v === null) return undefined;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return v.toISOString();
   if (typeof v === 'string') return v;
   if (typeof v === 'number') return String(v);
   return undefined;
@@ -35,7 +36,32 @@ function normProb(v: unknown): number {
   return v;
 }
 
-// undefined when no forecast frontmatter or missing required fields
+// undefined when no forecast frontmatter or missing required fields. Pure — no I/O, no parse.
+export function parseForecastFromData(
+  data: Record<string, unknown>,
+  notePath: string,
+): Forecast | undefined {
+  const raw = data.forecast as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const claim = typeof raw.claim === 'string' && raw.claim.length > 0 ? raw.claim : undefined;
+  const by = toIsoLike(raw.by);
+  const markedAt = toIsoLike(raw.marked_at);
+  if (!claim || !by || !markedAt) return undefined;
+  return { notePath, claim, by, markedAt, probability: normProb(raw.probability) };
+}
+
+// undefined when no resolved frontmatter or outcome isn't bool. Pure — no I/O, no parse.
+export function parseResolvedFromData(data: Record<string, unknown>): ResolvedRaw | undefined {
+  const raw = data.resolved as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (typeof raw.outcome !== 'boolean') return undefined;
+  const resolvedAt = toIsoLike(raw.resolved_at);
+  if (!resolvedAt) return undefined;
+  return { outcome: raw.outcome, resolvedAt };
+}
+
+// Thin string-wrapper → call matter() once, delegate to data helper. Kept for back-compat w/ tests + callers.
+// New callers that have a parsed `data` object → call parseForecastFromData directly to skip double parse.
 export function parseForecast(content: string, notePath: string): Forecast | undefined {
   let fm: Record<string, unknown>;
   try {
@@ -43,16 +69,10 @@ export function parseForecast(content: string, notePath: string): Forecast | und
   } catch {
     return undefined;
   }
-  const raw = fm.forecast as Record<string, unknown> | undefined;
-  if (!raw || typeof raw !== 'object') return undefined;
-  const claim = typeof raw.claim === 'string' ? raw.claim : undefined;
-  const by = toIsoLike(raw.by);
-  const markedAt = toIsoLike(raw.marked_at);
-  if (!claim || !by || !markedAt) return undefined;
-  return { notePath, claim, by, markedAt, probability: normProb(raw.probability) };
+  return parseForecastFromData(fm, notePath);
 }
 
-// undefined when no resolved frontmatter or outcome isn't bool
+// Thin string-wrapper → matches parseForecast pattern. Prefer parseResolvedFromData when data is in hand.
 export function parseResolved(content: string): ResolvedRaw | undefined {
   let fm: Record<string, unknown>;
   try {
@@ -60,12 +80,7 @@ export function parseResolved(content: string): ResolvedRaw | undefined {
   } catch {
     return undefined;
   }
-  const raw = fm.resolved as Record<string, unknown> | undefined;
-  if (!raw || typeof raw !== 'object') return undefined;
-  if (typeof raw.outcome !== 'boolean') return undefined;
-  const resolvedAt = toIsoLike(raw.resolved_at);
-  if (!resolvedAt) return undefined;
-  return { outcome: raw.outcome, resolvedAt };
+  return parseResolvedFromData(fm);
 }
 
 // Brier = mean((p - outcome)^2); null on empty → caller flags "no signal yet"
