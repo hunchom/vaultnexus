@@ -35,6 +35,19 @@ describe('ai-chat-model factories (offline shape checks)', () => {
     });
     expect(m.id).toBe('openai-compatible:llama3');
   });
+
+  it('all 3 adapters expose streamCompose (Plan 23)', () => {
+    const a = createAnthropicChatModel({ apiKey: 'k' });
+    const b = createOpenAIChatModel({ apiKey: 'k' });
+    const c = createOpenAICompatibleChatModel({
+      baseURL: 'http://x',
+      apiKey: 'k',
+      model: 'm',
+    });
+    expect(typeof a.streamCompose).toBe('function');
+    expect(typeof b.streamCompose).toBe('function');
+    expect(typeof c.streamCompose).toBe('function');
+  });
 });
 
 // gated tests → run only when matching API key in env. default-skip CI safety.
@@ -52,6 +65,19 @@ describe.skipIf(!process.env.VAULTNEXUS_TEST_ANTHROPIC_KEY)(
       ]);
       expect(out.toUpperCase()).toContain('PONG');
     }, 30_000);
+
+    it('streamCompose yields PONG across one+ chunks (Plan 23)', async () => {
+      const m = createAnthropicChatModel({
+        apiKey: process.env.VAULTNEXUS_TEST_ANTHROPIC_KEY!,
+        model: process.env.VAULTNEXUS_TEST_ANTHROPIC_MODEL,
+      });
+      const chunks: string[] = [];
+      for await (const c of m.streamCompose!([
+        { role: 'user', content: 'Reply with the single literal word: PONG' },
+      ])) chunks.push(c);
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.join('').toUpperCase()).toContain('PONG');
+    }, 30_000);
   },
 );
 
@@ -67,6 +93,19 @@ describe.skipIf(!process.env.VAULTNEXUS_TEST_OPENAI_KEY)(
         { role: 'user', content: 'Reply with the single literal word: PONG' },
       ]);
       expect(out.toUpperCase()).toContain('PONG');
+    }, 30_000);
+
+    it('streamCompose yields PONG across one+ chunks (Plan 23)', async () => {
+      const m = createOpenAIChatModel({
+        apiKey: process.env.VAULTNEXUS_TEST_OPENAI_KEY!,
+        model: process.env.VAULTNEXUS_TEST_OPENAI_MODEL,
+      });
+      const chunks: string[] = [];
+      for await (const c of m.streamCompose!([
+        { role: 'user', content: 'Reply with the single literal word: PONG' },
+      ])) chunks.push(c);
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks.join('').toUpperCase()).toContain('PONG');
     }, 30_000);
   },
 );
@@ -86,5 +125,19 @@ describe.skipIf(
       { role: 'user', content: 'Reply with the single literal word: PONG' },
     ]);
     expect(out.toUpperCase()).toContain('PONG');
+  }, 30_000);
+
+  it('streamCompose yields PONG across one+ chunks (Plan 23)', async () => {
+    const m = createOpenAICompatibleChatModel({
+      baseURL: process.env.VAULTNEXUS_TEST_OPENAI_COMPATIBLE_URL!,
+      apiKey: process.env.VAULTNEXUS_TEST_OPENAI_COMPATIBLE_KEY!,
+      model: process.env.VAULTNEXUS_TEST_OPENAI_COMPATIBLE_MODEL!,
+    });
+    const chunks: string[] = [];
+    for await (const c of m.streamCompose!([
+      { role: 'user', content: 'Reply with the single literal word: PONG' },
+    ])) chunks.push(c);
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.join('').toUpperCase()).toContain('PONG');
   }, 30_000);
 });

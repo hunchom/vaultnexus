@@ -1,4 +1,4 @@
-import { generateText, type LanguageModel, type ModelMessage } from 'ai';
+import { generateText, streamText, type LanguageModel, type ModelMessage } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -13,7 +13,11 @@ export function createAnthropicChatModel(p: { apiKey: string; model?: string }):
   const modelId = p.model ?? DEFAULT_ANTHROPIC_MODEL;
   // cast → AnthropicMessagesModelId literal-union accepts strings via `(string & {})` escape hatch
   const model = provider(modelId as never);
-  return { id: `anthropic:${modelId}`, compose: (msgs, opts) => call(model, msgs, opts) };
+  return {
+    id: `anthropic:${modelId}`,
+    compose: (msgs, opts) => call(model, msgs, opts),
+    streamCompose: (msgs, opts) => streamCall(model, msgs, opts),
+  };
 }
 
 /** OpenAI via @ai-sdk/openai. Default → gpt-4o-mini (cheap, cite-aware). */
@@ -21,7 +25,11 @@ export function createOpenAIChatModel(p: { apiKey: string; model?: string }): Ch
   const provider = createOpenAI({ apiKey: p.apiKey });
   const modelId = p.model ?? DEFAULT_OPENAI_MODEL;
   const model = provider(modelId);
-  return { id: `openai:${modelId}`, compose: (msgs, opts) => call(model, msgs, opts) };
+  return {
+    id: `openai:${modelId}`,
+    compose: (msgs, opts) => call(model, msgs, opts),
+    streamCompose: (msgs, opts) => streamCall(model, msgs, opts),
+  };
 }
 
 /** OpenAI-compatible (Ollama / LM Studio / vLLM / etc.) via @ai-sdk/openai-compatible. */
@@ -37,7 +45,11 @@ export function createOpenAICompatibleChatModel(p: {
     apiKey: p.apiKey,
   });
   const model = provider(p.model);
-  return { id: `openai-compatible:${p.model}`, compose: (msgs, opts) => call(model, msgs, opts) };
+  return {
+    id: `openai-compatible:${p.model}`,
+    compose: (msgs, opts) => call(model, msgs, opts),
+    streamCompose: (msgs, opts) => streamCall(model, msgs, opts),
+  };
 }
 
 // shared one-shot generateText call → ChatMessage[] → ModelMessage[] (shape compatible)
@@ -53,4 +65,19 @@ async function call(
     temperature: opts.temperature ?? 0.2,
   });
   return text;
+}
+
+// streaming variant → wraps streamText, yields textStream chunks 1:1. defaults match call().
+async function* streamCall(
+  model: LanguageModel,
+  messages: ChatMessage[],
+  opts: ChatComposeOpts = {},
+): AsyncIterable<string> {
+  const result = streamText({
+    model,
+    messages: messages as ModelMessage[],
+    maxOutputTokens: opts.maxTokens ?? 800,
+    temperature: opts.temperature ?? 0.2,
+  });
+  for await (const chunk of result.textStream) yield chunk;
 }
