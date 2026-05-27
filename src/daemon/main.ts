@@ -34,8 +34,8 @@ async function main(): Promise<void> {
   if (existsSync(socketPath)) rmSync(socketPath);
 
   const embedder = await selectEmbedder();
-  const index = new VaultIndex(embedder);
   const vaultDir = process.env.VAULTNEXUS_VAULT;
+  const index = new VaultIndex(embedder, vaultDir);
   if (vaultDir) {
     const n = await indexVault(vaultDir, index);
     process.stderr.write(`vaultnexus: indexed ${n} notes from ${vaultDir}\n`);

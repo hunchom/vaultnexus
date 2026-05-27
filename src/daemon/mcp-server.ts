@@ -47,6 +47,25 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     );
 
     server.registerTool(
+      'vaultnexus_history',
+      {
+        description:
+          'Walk git history for a note. Returns chronological (newest first) revisions w/ sha + commitDate + message + authorEmail; optional content snapshot + user-declared frontmatter date. Backbone for belief-drift narration; no LLM compose — every revision cites a real git SHA the user can `git show`.',
+        inputSchema: {
+          notePath: z.string(),
+          since: z.string().optional(),
+          until: z.string().optional(),
+          withContent: z.boolean().optional(),
+          maxRevisions: z.number().int().positive().optional(),
+        },
+      },
+      async ({ notePath, since, until, withContent, maxRevisions }) => {
+        const revisions = await index.history(notePath, { since, until, withContent, maxRevisions });
+        return { content: [{ type: 'text', text: JSON.stringify({ revisions }) }] };
+      },
+    );
+
+    server.registerTool(
       'vaultnexus_trace',
       {
         description:

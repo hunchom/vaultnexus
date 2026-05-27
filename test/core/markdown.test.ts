@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMarkdown } from '../../src/core/markdown.js';
+import { parseMarkdown, extractFrontmatterDate } from '../../src/core/markdown.js';
 
 describe('parseMarkdown', () => {
   it('splits frontmatter and reports body byte offset', () => {
@@ -34,6 +34,26 @@ describe('parseMarkdown', () => {
     expect(r.frontmatter).toEqual({});
     const sliced = Buffer.from(src).subarray(r.bodyByteOffset).toString();
     expect(sliced).toMatch(/^# Heading/);
+  });
+
+  it('extractFrontmatterDate: ISO string from valid date field', () => {
+    const iso = extractFrontmatterDate('---\ndate: 2024-02-15\n---\n# Hello\n');
+    expect(iso).toBeDefined();
+    expect(Number.isNaN(Date.parse(iso!))).toBe(false);
+    // gray-matter parses bare ISO date → Date; impl normalizes to ISO string.
+    expect(iso!.startsWith('2024-02-15')).toBe(true);
+  });
+
+  it('extractFrontmatterDate: undefined when no frontmatter', () => {
+    expect(extractFrontmatterDate('# Just body\n')).toBeUndefined();
+  });
+
+  it('extractFrontmatterDate: undefined when frontmatter has no `date` field', () => {
+    expect(extractFrontmatterDate('---\ntitle: T\n---\n# B\n')).toBeUndefined();
+  });
+
+  it('extractFrontmatterDate: undefined when date is invalid', () => {
+    expect(extractFrontmatterDate('---\ndate: not-a-date\n---\n# B\n')).toBeUndefined();
   });
 
   it('body string round-trips through byteOffset slice', () => {
