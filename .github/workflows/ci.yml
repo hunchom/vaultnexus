@@ -18,7 +18,7 @@ jobs:
         node: ['22']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: install pnpm
         uses: pnpm/action-setup@v4
@@ -57,7 +57,7 @@ jobs:
     name: docs link check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: verify README + GETTING_STARTED exist
         run: |
           test -f README.md
