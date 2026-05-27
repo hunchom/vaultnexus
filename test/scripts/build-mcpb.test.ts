@@ -19,7 +19,11 @@ let zipListing: string;
 beforeAll(async () => {
   outDir = mkdtempSync(join(tmpdir(), 'vn-mcpb-test-'));
   buildResult = await buildMcpb({ outDir });
-  zipListing = execFileSync('unzip', ['-l', buildResult.mcpbPath], { encoding: 'utf-8' });
+  // pnpm-deployed bundle has ~233 deps → unzip listing exceeds default 1 MB buffer
+  zipListing = execFileSync('unzip', ['-l', buildResult.mcpbPath], {
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }, 240000);
 
 afterAll(() => {
@@ -50,8 +54,15 @@ describe('T1 build-mcpb script', () => {
   });
 
   it('zip contains server/node_modules with at least one dep', () => {
-    // @modelcontextprotocol/sdk → declared prod dep, must be present
-    expect(zipListing).toMatch(/server\/node_modules\/@modelcontextprotocol\/sdk\//);
+    // @modelcontextprotocol/sdk → declared prod dep, present as symlink → .pnpm/...
+    expect(zipListing).toMatch(/server\/node_modules\/@modelcontextprotocol\/sdk/);
+  });
+
+  it('zip contains transitive deps via .pnpm virtual store (bindings, ajv)', () => {
+    // pnpm flat layout: transitives ONLY exist under .pnpm/<pkg>@<ver>/node_modules/<dep>
+    // → catches the regression where old walker silently dropped 46/67 transitives
+    expect(zipListing).toMatch(/server\/node_modules\/\.pnpm\/bindings@/);
+    expect(zipListing).toMatch(/server\/node_modules\/\.pnpm\/ajv@/);
   });
 });
 
@@ -117,7 +128,13 @@ describe('T3 version sync', () => {
       execFileSync('ln', ['-s', join(REPO_ROOT, 'dist'), join(tmpRoot, 'dist')]);
       execFileSync('ln', ['-s', join(REPO_ROOT, 'node_modules'), join(tmpRoot, 'node_modules')]);
 
-      const bumped = await buildMcpb({ repoRoot: tmpRoot, outDir: join(tmpRoot, 'out'), skipBuild: true });
+      // skipNodeModules → fake repo isn't a pnpm workspace; we only verify version propagation
+      const bumped = await buildMcpb({
+        repoRoot: tmpRoot,
+        outDir: join(tmpRoot, 'out'),
+        skipBuild: true,
+        skipNodeModules: true,
+      });
       expect(bumped.mcpbPath).toContain('vaultnexus-9.9.9-test.mcpb');
       expect(bumped.version).toBe('9.9.9-test');
       expect(bumped.manifest.version).toBe('9.9.9-test');
@@ -136,12 +153,24 @@ describe('T4 user-config schema', () => {
     expect(m.user_config.vault_path.required).toBe(true);
   });
 
-  it('mcp_config.env wires vault_path → VAULTNEXUS_VAULT_PATH', () => {
+  it('mcp_config.env wires vault_path → VAULTNEXUS_VAULT', () => {
+    // daemon reads VAULTNEXUS_VAULT (src/daemon/main.ts), not VAULTNEXUS_VAULT_PATH
     const m = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
     const env = m.server.mcp_config.env ?? {};
-    const wired = Object.values(env).some(
-      (v) => typeof v === 'string' && v.includes('${user_config.vault_path}'),
-    );
-    expect(wired).toBe(true);
+    expect(env.VAULTNEXUS_VAULT).toBe('${user_config.vault_path}');
+  });
+
+  it('mcp_config.env wires chat_api_key → VAULTNEXUS_CHAT_KEY (daemon name)', () => {
+    // daemon reads VAULTNEXUS_CHAT_KEY (src/daemon/select-chat-model.ts), not _CHAT_API_KEY
+    const m = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
+    const env = m.server.mcp_config.env ?? {};
+    expect(env.VAULTNEXUS_CHAT_KEY).toBe('${user_config.chat_api_key}');
+  });
+
+  it('compatibility.platforms reflects single-platform reality', () => {
+    // we only ship the build-host native better-sqlite3 binary → don't lie
+    const m = JSON.parse(readFileSync(MANIFEST_PATH, 'utf-8'));
+    expect(Array.isArray(m.compatibility.platforms)).toBe(true);
+    expect(m.compatibility.platforms.length).toBeLessThanOrEqual(1);
   });
 });
