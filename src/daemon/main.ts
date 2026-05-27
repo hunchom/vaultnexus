@@ -71,11 +71,18 @@ async function main(): Promise<void> {
   });
   await new Promise<void>((resolve) => socketServer.listen(socketPath, resolve));
 
-  const http: ServerType = serve({
-    fetch: createHttpApp({ index: vaultDir ? index : undefined }).fetch,
-    hostname: '127.0.0.1',
-    port: httpPort,
-  });
+  // Await actual bind → race-free readiness signal for integration tests
+  let httpReady: () => void;
+  const httpListening = new Promise<void>((r) => { httpReady = r; });
+  const http: ServerType = serve(
+    {
+      fetch: createHttpApp({ index: vaultDir ? index : undefined }).fetch,
+      hostname: '127.0.0.1',
+      port: httpPort,
+    },
+    () => httpReady(),
+  );
+  await httpListening;
 
   // Promisify server closes so cleanup completes before exit.
   const closeSocketServer = (): Promise<void> =>
