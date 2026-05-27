@@ -28,6 +28,8 @@ Talks to Claude Code, Claude Desktop, and an Obsidian sidebar — over loopback 
 No cloud round-trip on query.
 
 [![CI](https://github.com/hunchom/vaultnexus/actions/workflows/ci.yml/badge.svg)](https://github.com/hunchom/vaultnexus/actions/workflows/ci.yml)
+[![Docker](https://github.com/hunchom/vaultnexus/actions/workflows/docker.yml/badge.svg)](https://github.com/hunchom/vaultnexus/actions/workflows/docker.yml)
+[![CodeQL](https://github.com/hunchom/vaultnexus/actions/workflows/codeql.yml/badge.svg)](https://github.com/hunchom/vaultnexus/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)

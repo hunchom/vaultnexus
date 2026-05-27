@@ -1,0 +1,40 @@
+name: Docker
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'src/**'
+
+jobs:
+  build:
+    name: build image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: docker build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: vaultnexus:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: smoke (image runs + binary present)
+        run: |
+          docker run --rm vaultnexus:ci node -e "console.log('node ok ' + process.version)"
+          docker run --rm vaultnexus:ci ls dist/daemon/main.js dist/bridge/main.js

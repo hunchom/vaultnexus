@@ -1,0 +1,29 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '23 6 * * 1'  # Mondays at 06:23 UTC — off-peak
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: analyze typescript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
