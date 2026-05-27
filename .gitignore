@@ -3,3 +3,6 @@ dist/
 *.log
 *.sock
 *.lock
+# Obsidian plugin bundle — built artifact, not committed
+obsidian-plugin/main.js
+obsidian-plugin/main.js.map
