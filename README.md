@@ -33,7 +33,7 @@ No cloud round-trip on query.
 [![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)](https://modelcontextprotocol.io/)
 [![Obsidian plugin](https://img.shields.io/badge/Obsidian-plugin-7c3aed?logo=obsidian)](https://obsidian.md/)
 
-[Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](docs/ARCHITECTURE.md) · [MCP tools](#mcp-tools) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Getting started](docs/GETTING_STARTED.md) · [Architecture](docs/ARCHITECTURE.md) · [MCP tools](#mcp-tools) · [Configuration](#configuration) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -50,6 +50,34 @@ No cloud round-trip on query.
 | **Content-hash caching** | Re-embedding skipped when chunks unchanged. Restart cost is milliseconds, not minutes. |
 | **Snapshot persistence** | Vectors + chunks persist to an on-disk SQLite snapshot. The daemon survives reboots without re-embedding the vault. |
 | **Validated** | On a paraphrase gold set where queries share no distinctive token with their target, `voyage-3-large` hits recall@1 = 0.958 / MRR = 1.000. Lexical baseline: 0.500 / 0.600. |
+
+---
+
+## Try it in 30 seconds
+
+No vault? No API key? Run against the bundled 33-note demo vault with the offline `FakeEmbedder`:
+
+```bash
+git clone https://github.com/hunchom/vaultnexus.git
+cd vaultnexus
+pnpm install
+pnpm run build
+pnpm run demo            # → starts daemon against demo-vault-seeded/ on :38473
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:38473/status
+# → {"status":"ok","indexed":207,"embedder":"fake",...}
+
+curl -X POST http://127.0.0.1:38473/search \
+  -H 'content-type: application/json' \
+  -d '{"query":"deep work blocks","k":3}'
+# → top hit: notes/decisions/remote-work-future.md (score 0.937)
+```
+
+For real semantic quality (recall@3 = 1.000 on the bundled paraphrase eval), point `VAULTNEXUS_EMBED_*` at any OpenAI-compatible endpoint — see [Configuration](#configuration).
 
 ---
 
