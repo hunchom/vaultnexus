@@ -21,7 +21,8 @@
     "seed:demo": "tsx scripts/seed-demo-vault.ts",
     "drift": "tsx src/eval/drift-check.ts",
     "drift:perturb": "tsx src/eval/lexicon-perturb-check.ts",
-    "reason:stream": "tsx src/eval/reason-stream-cli.ts"
+    "reason:stream": "tsx src/eval/reason-stream-cli.ts",
+    "package:mcpb": "tsx scripts/build-mcpb.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.79",
