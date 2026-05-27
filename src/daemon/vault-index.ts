@@ -31,10 +31,13 @@ export interface SearchHit extends IndexedChunk {
 
 /** Plan 25 — optional query-time controls.
  *  router: true → classifyQuery() → fusion weights per intent (default false = balanced 1.0/1.0).
- *  diversity: 0..1 → DPP rerank top-(k*4) chunks with λ = 1-diversity (0 = off, 0.3 = moderate). */
+ *  diversity: 0..1 → DPP rerank top-(k*4) chunks with λ = 1-diversity (0 = off, 0.3 = moderate).
+ *  ftsOnly: true → fuse with weights [0, 1] → vector list contributes nothing, FTS5 alone ranks.
+ *           Used by leakage-floor regression. Mutually exclusive with router (router wins). */
 export interface QueryOptions {
   router?: boolean;
   diversity?: number;
+  ftsOnly?: boolean;
 }
 
 /** Plan 25 telemetry — what the router decided + DPP applied. Returned by queryWithMeta(). */
@@ -204,6 +207,7 @@ export class VaultIndex {
     const lex = this.fts.search(text, want);
 
     // Router → fusion weights. Default (off) → balanced 1.0/1.0 (Plan 08 behavior).
+    // ftsOnly → suppress vector list entirely. router wins when both set.
     let intent: QueryIntent | null = null;
     let weights: [number, number] | null = null;
     let fusionWeights: number[] | undefined;
@@ -212,6 +216,8 @@ export class VaultIndex {
       const w = weightsForIntent(intent);
       weights = [w.vector, w.fts];
       fusionWeights = [w.vector, w.fts];
+    } else if (opts.ftsOnly) {
+      fusionWeights = [0, 1];
     }
 
     const fusedAll = fuseRRF(

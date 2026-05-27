@@ -18,13 +18,30 @@ import { selectEmbedder } from '../daemon/select-embedder.js';
 import { runSeededEval } from './seeded-harness.js';
 import { SEEDED_GOLD_QUERIES } from './seeded-gold.js';
 
+/** Parse env-var truthiness for VAULTNEXUS_EVAL_FTS_ONLY. Returns true | false | 'invalid'.
+ *  Accepts 1/true/yes/on (true), 0/false/no/off/'' (false), case-insensitive, trimmed.
+ *  Anything else → 'invalid' → caller exits 2 with a clear diagnostic. */
+export function parseFtsOnly(raw: string | undefined): boolean | 'invalid' {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  if (['', '0', 'false', 'no', 'off'].includes(v)) return false;
+  return 'invalid';
+}
+
 const rawMin = process.env.VAULTNEXUS_EVAL_MIN_RECALL;
 const THRESHOLD = Number(rawMin ?? 0);
 if (rawMin !== undefined && Number.isNaN(THRESHOLD)) {
   process.stderr.write(`eval:seeded: VAULTNEXUS_EVAL_MIN_RECALL='${rawMin}' not a number\n`);
   process.exit(1);
 }
-const FTS_ONLY = process.env.VAULTNEXUS_EVAL_FTS_ONLY === '1';
+const FTS_ONLY_PARSED = parseFtsOnly(process.env.VAULTNEXUS_EVAL_FTS_ONLY);
+if (FTS_ONLY_PARSED === 'invalid') {
+  process.stderr.write(
+    `eval:seeded: VAULTNEXUS_EVAL_FTS_ONLY='${process.env.VAULTNEXUS_EVAL_FTS_ONLY}' not recognized — expected 1/true/yes/on or 0/false/no/off\n`,
+  );
+  process.exit(2);
+}
+const FTS_ONLY = FTS_ONLY_PARSED;
 
 async function main(): Promise<void> {
   // seed script lives outside src/ → spawn it instead of importing across rootDir boundary.
@@ -69,7 +86,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  process.stderr.write(`eval:seeded: fatal ${String(e)}\n`);
-  process.exit(1);
-});
+// Entrypoint guard: only run main() when invoked as a CLI, not when imported
+// by tests for parseFtsOnly. Compares import.meta.url to process.argv[1] URL.
+const invokedAsCli =
+  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (invokedAsCli) {
+  main().catch((e) => {
+    process.stderr.write(`eval:seeded: fatal ${String(e)}\n`);
+    process.exit(1);
+  });
+}
