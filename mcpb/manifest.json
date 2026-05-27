@@ -1,0 +1,56 @@
+{
+  "manifest_version": "0.3",
+  "name": "vaultnexus",
+  "display_name": "VaultNexus",
+  "version": "0.0.1",
+  "description": "Local-first Obsidian knowledge engine over MCP",
+  "long_description": "VaultNexus indexes an Obsidian/Markdown vault into a hybrid retrieval graph (exact + semantic + wikilink) and exposes it to Claude via MCP. Runs entirely on your machine; the LLM reasoning lane optionally cites real notes back to you.",
+  "author": {
+    "name": "Roger French",
+    "email": "merihmengisteab@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["obsidian", "markdown", "knowledge", "rag", "mcp", "local-first"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/dist/bridge/main.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/dist/bridge/main.js"],
+      "env": {
+        "VAULTNEXUS_VAULT_PATH": "${user_config.vault_path}",
+        "VAULTNEXUS_CHAT_PROVIDER": "${user_config.chat_provider}",
+        "VAULTNEXUS_CHAT_API_KEY": "${user_config.chat_api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "vault_path": {
+      "type": "directory",
+      "title": "Vault Path",
+      "description": "Path to your Obsidian or Markdown vault directory",
+      "required": true
+    },
+    "chat_provider": {
+      "type": "string",
+      "title": "Chat Provider (optional)",
+      "description": "LLM provider for cited reasoning: 'anthropic', 'openai', or empty to disable",
+      "required": false,
+      "default": ""
+    },
+    "chat_api_key": {
+      "type": "string",
+      "title": "Chat API Key (optional)",
+      "description": "API key for the selected chat provider; leave empty to disable reasoning",
+      "required": false,
+      "sensitive": true,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  }
+}
