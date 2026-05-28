@@ -7,10 +7,11 @@ Format adapted from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) —
 
 ### Added
 
-- **MCP tool surface expanded 8 → 26.** New tools:
+- **MCP tool surface expanded 8 → 35.** New tools:
   - Retrieval: `vaultnexus_neighbors`
   - Vault read + analytics: `vaultnexus_list`, `vaultnexus_read_page`, `vaultnexus_outline`, `vaultnexus_stats`, `vaultnexus_tags`, `vaultnexus_recent`, `vaultnexus_orphans`, `vaultnexus_link_graph`
-  - Vault write: `vaultnexus_create_page`, `vaultnexus_create_folder`, `vaultnexus_append_to_page`, `vaultnexus_insert_after_heading`, `vaultnexus_replace_in_page`, `vaultnexus_delete_page`, `vaultnexus_delete_folder`, `vaultnexus_move`, `vaultnexus_copy_page`
+  - Vault write: `vaultnexus_create_page`, `vaultnexus_create_folder`, `vaultnexus_append_to_page`, `vaultnexus_insert_after_heading`, `vaultnexus_replace_in_page`, `vaultnexus_rename_heading`, `vaultnexus_patch_section`, `vaultnexus_search_replace_vault`, `vaultnexus_delete_page`, `vaultnexus_delete_folder`, `vaultnexus_move`, `vaultnexus_copy_page`
+  - Discovery + convenience: `vaultnexus_find_by_tag`, `vaultnexus_broken_links`, `vaultnexus_get_partial`, `vaultnexus_daily_note`, `vaultnexus_periodic_note`, `vaultnexus_fetch_url`
 - **Live re-indexing via `fs.watch`** — external writes (Obsidian saving a note) trigger debounced reindex (250ms). Tool-side writes synchronously reindex before returning.
 - **Safe FS layer** — every write/delete tool routes through `safeJoin()` which rejects `..`/absolute paths so the surface stays bounded to the vault root.
 - **Soft-delete** — deletes move into `<vault>/.trash/<timestamp>/` instead of unlinking.

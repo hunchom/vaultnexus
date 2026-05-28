@@ -227,7 +227,7 @@ docker compose exec ollama ollama pull nomic-embed-text
 
 ## MCP tools
 
-**26 tools** across retrieval, reasoning, vault analytics, file I/O, and history. Every tool returns a JSON payload. Cited tools include `notePath`, `headingPath`, `byteStart`, `byteEnd` on every hit.
+**35 tools** across retrieval, reasoning, vault analytics, file I/O, and history. Every tool returns a JSON payload. Cited tools include `notePath`, `headingPath`, `byteStart`, `byteEnd` on every hit.
 
 #### Retrieval
 
@@ -265,6 +265,10 @@ docker compose exec ollama ollama pull nomic-embed-text
 | `vaultnexus_recent` | Most-recently-modified notes. |
 | `vaultnexus_orphans` | Notes with no inbound wikilinks. |
 | `vaultnexus_link_graph` | Inbound + outbound wikilinks for a note. |
+| `vaultnexus_find_by_tag` | Notes containing a `#tag` (case-insensitive, strict). |
+| `vaultnexus_broken_links` | Wikilinks pointing at unresolved targets. |
+| `vaultnexus_get_partial` | Slice of a note by heading section, frontmatter, or outline. |
+| `vaultnexus_fetch_url` | HTTP GET a URL → trimmed markdown (200KB cap). |
 
 #### Vault write (re-indexes immediately)
 
@@ -275,6 +279,11 @@ docker compose exec ollama ollama pull nomic-embed-text
 | `vaultnexus_append_to_page` | Append text to a note. |
 | `vaultnexus_insert_after_heading` | Insert text after an exact heading match. |
 | `vaultnexus_replace_in_page` | Literal find/replace (`all: true` for global). |
+| `vaultnexus_rename_heading` | Rename one heading inside a note (depth preserved). |
+| `vaultnexus_patch_section` | Replace the body of a heading section (heading line preserved). |
+| `vaultnexus_search_replace_vault` | Bulk find/replace across notes (optional `pathPrefix` filter). |
+| `vaultnexus_daily_note` | Get or create `YYYY-MM-DD.md` (optional folder + template). |
+| `vaultnexus_periodic_note` | Daily / weekly (`YYYY-Www`) / monthly / yearly periodic notes. |
 | `vaultnexus_delete_page` | Soft-delete (moves to `<vault>/.trash/<timestamp>/`). |
 | `vaultnexus_delete_folder` | Soft-delete a folder. Requires `force: true` for non-empty. |
 | `vaultnexus_move` | Rename / move a note or folder within the vault. |
