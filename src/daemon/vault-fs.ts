@@ -292,6 +292,143 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Split a note at every level-N heading → N new notes (one per section). Originals optionally kept. */
+export async function splitNote(
+  vaultDir: string, notePath: string, opts: { atDepth?: number; outputFolder?: string; keepOriginal?: boolean } = {},
+): Promise<{ created: string[]; removed?: string }> {
+  const depth = Math.max(1, Math.min(opts.atDepth ?? 2, 6));
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const re = new RegExp(`^#{${depth}}\\s+(.+?)\\s*$`);
+  const sections: Array<{ title: string; body: string[] }> = [];
+  let cur: { title: string; body: string[] } | null = null;
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (m) { if (cur) sections.push(cur); cur = { title: m[1].trim(), body: [line] }; }
+    else if (cur) cur.body.push(line);
+  }
+  if (cur) sections.push(cur);
+  if (sections.length === 0) throw new VaultFsError(`no level-${depth} headings in ${notePath}`, 'EBAD');
+  const folder = opts.outputFolder ?? notePath.replace(/\.md$/i, '') + '-split';
+  await createFolder(vaultDir, folder);
+  const created: string[] = [];
+  for (const s of sections) {
+    const safe = s.title.replace(/[^\w\s.-]/g, '').trim().replace(/\s+/g, '-').slice(0, 80) || 'untitled';
+    const p = `${folder}/${safe}.md`;
+    await createPage(vaultDir, p, s.body.join('\n'), { overwrite: true });
+    created.push(p);
+  }
+  let removed: string | undefined;
+  if (opts.keepOriginal === false) {
+    const r = await deletePage(vaultDir, notePath);
+    removed = r.trashedAt;
+  }
+  return { created, removed };
+}
+
+/** Concat N notes into one. Optional source deletion (soft → .trash). */
+export async function mergeNotes(
+  vaultDir: string, sourcePaths: string[], targetPath: string,
+  opts: { separator?: string; deleteSources?: boolean } = {},
+): Promise<{ targetPath: string; bytes: number; mergedFrom: string[]; sourcesTrashed: string[] }> {
+  const sep = opts.separator ?? '\n\n---\n\n';
+  const parts: string[] = [];
+  const merged: string[] = [];
+  for (const sp of sourcePaths) {
+    try {
+      const { text } = await readPage(vaultDir, sp);
+      parts.push(text);
+      merged.push(sp);
+    } catch { /* skip missing */ }
+  }
+  const body = parts.join(sep);
+  const r = await createPage(vaultDir, targetPath, body, { overwrite: true });
+  const trashed: string[] = [];
+  if (opts.deleteSources) {
+    for (const sp of merged) {
+      if (sp === targetPath) continue;
+      try { const t = await deletePage(vaultDir, sp); trashed.push(t.trashedAt); }
+      catch { /* skip */ }
+    }
+  }
+  return { targetPath, bytes: r.bytes, mergedFrom: merged, sourcesTrashed: trashed };
+}
+
+/** Find files by extension(s) under the vault. Returns relative paths + sizes. */
+export async function findByExtension(
+  vaultDir: string, exts: string[], folderPath: string = '',
+): Promise<Array<{ path: string; bytes: number; ext: string }>> {
+  const root = await safeRealpath(vaultDir, safeJoin(vaultDir, folderPath));
+  const normExts = new Set(exts.map((e) => e.toLowerCase().replace(/^\./, '')));
+  const out: Array<{ path: string; bytes: number; ext: string }> = [];
+  const walk = async (d: string): Promise<void> => {
+    let entries; try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue;
+      if (e.isSymbolicLink()) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) {
+        const ext = extname(e.name).toLowerCase().replace(/^\./, '');
+        if (!normExts.has(ext)) continue;
+        const s = await stat(p);
+        out.push({ path: relative(vaultDir, p), bytes: s.size, ext });
+      }
+    }
+  };
+  await walk(root);
+  out.sort((a, b) => a.path.localeCompare(b.path));
+  return out;
+}
+
+/** Block ids (^id) referenced inside a note. Useful for citing chunks. */
+export async function blockIds(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; ids: Array<{ id: string; line: number }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const ids: Array<{ id: string; line: number }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(/\s\^([A-Za-z0-9-]+)$/g)) {
+      ids.push({ id: m[1], line: i + 1 });
+    }
+  }
+  return { notePath, ids };
+}
+
+/** Bulk rename: apply multiple renames in one call. Skips failures, returns per-pair status. */
+export async function bulkRename(
+  vaultDir: string, renames: Array<{ from: string; to: string }>,
+): Promise<Array<{ from: string; to: string; ok: boolean; error?: string }>> {
+  const out: Array<{ from: string; to: string; ok: boolean; error?: string }> = [];
+  for (const r of renames) {
+    try { await renamePath(vaultDir, r.from, r.to); out.push({ ...r, ok: true }); }
+    catch (e) { out.push({ ...r, ok: false, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Notes w/ at least one line longer than N chars. Sorted by max line desc. */
+export async function findLongLines(
+  vaultDir: string, minLineLen: number, limit: number = 50,
+): Promise<Array<{ notePath: string; maxLineLen: number; line: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; maxLineLen: number; line: number }> = [];
+  for (const abs of files) {
+    const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
+    let maxLen = 0; let at = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].length > maxLen) { maxLen = lines[i].length; at = i + 1; }
+    }
+    if (maxLen >= minLineLen) {
+      out.push({ notePath: relative(vaultDir, abs), maxLineLen: maxLen, line: at });
+    }
+  }
+  out.sort((a, b) => b.maxLineLen - a.maxLineLen);
+  return out.slice(0, limit);
+}
+
 /** First N lines or first N bytes of a note. Token-efficient peek. */
 export async function excerpt(
   vaultDir: string, notePath: string, opts: { lines?: number; bytes?: number } = {},

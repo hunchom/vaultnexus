@@ -83,6 +83,32 @@ export function orphanNotes(noteLinks: Map<string, string[]>): string[] {
   return allNotes.filter((p) => !inbound.has(p)).sort();
 }
 
+/** Outbound link counts per note → ranked. Most-linking notes first. */
+export function linkCountsPerNote(noteLinks: Map<string, string[]>): Array<{ notePath: string; outbound: number }> {
+  return [...noteLinks.entries()]
+    .map(([notePath, links]) => ({ notePath, outbound: links.length }))
+    .sort((a, b) => b.outbound - a.outbound);
+}
+
+/** Notes ranked by inbound wikilink count → highest first. */
+export function inboundRanking(noteLinks: Map<string, string[]>): Array<{ notePath: string; inbound: number }> {
+  const allNotes = [...noteLinks.keys()];
+  const inboundOf = new Map<string, number>(allNotes.map((p) => [p, 0]));
+  for (const [, targets] of noteLinks) {
+    for (const t of targets) {
+      const tLower = t.toLowerCase();
+      const hit = allNotes.find((p) => {
+        const base = p.replace(/\.md$/i, '').split('/').pop()?.toLowerCase();
+        return base === tLower || p.toLowerCase() === `${tLower}.md` || p.toLowerCase() === tLower;
+      });
+      if (hit) inboundOf.set(hit, (inboundOf.get(hit) ?? 0) + 1);
+    }
+  }
+  return [...inboundOf.entries()]
+    .map(([notePath, inbound]) => ({ notePath, inbound }))
+    .sort((a, b) => b.inbound - a.inbound);
+}
+
 /** Find note-title mentions in plain text that aren't wikilinked. Suggests upgrades. */
 export async function unlinkedMentions(
   vaultDir: string,

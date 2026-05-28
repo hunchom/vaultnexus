@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { health } from '../core/health.js';
 import type { VaultIndex } from './vault-index.js';
 import * as fsops from './vault-fs.js';
-import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph, notesByTag, brokenLinks, unlinkedMentions } from './vault-analytics.js';
+import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph, notesByTag, brokenLinks, unlinkedMentions, linkCountsPerNote, inboundRanking } from './vault-analytics.js';
 
 export interface McpServerDeps {
   index?: VaultIndex;
@@ -547,6 +547,144 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         await deps.onNoteChanged?.(notePath);
         return payload({ ...r, period, stem, created: true, text: initial });
       }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_split_note',
+    {
+      description: 'Split a note at every level-N heading → one new note per section in a folder. Optionally remove the original (soft-delete).',
+      inputSchema: { notePath: z.string(), atDepth: z.number().int().positive().max(6).optional(), outputFolder: z.string().optional(), keepOriginal: z.boolean().optional() },
+    },
+    async (args) => {
+      try {
+        const r = await fsops.splitNote(vaultDir, args.notePath, args);
+        for (const c of r.created) await deps.onNoteChanged?.(c);
+        if (r.removed) await deps.onNoteRemoved?.(args.notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_merge_notes',
+    {
+      description: 'Concat N source notes into one target note. Optional deleteSources (soft → .trash). Re-indexes target + sources.',
+      inputSchema: { sourcePaths: z.array(z.string()).min(1).max(100), targetPath: z.string(), separator: z.string().optional(), deleteSources: z.boolean().optional() },
+    },
+    async (args) => {
+      try {
+        const r = await fsops.mergeNotes(vaultDir, args.sourcePaths, args.targetPath, args);
+        await deps.onNoteChanged?.(args.targetPath);
+        for (const sp of r.mergedFrom) if (args.deleteSources && sp !== args.targetPath) await deps.onNoteRemoved?.(sp);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_by_extension',
+    {
+      description: 'Find files under the vault by extension(s). e.g. ["canvas","pdf"]. Returns paths + sizes + ext.',
+      inputSchema: { exts: z.array(z.string().min(1)).min(1).max(20), folderPath: z.string().optional() },
+    },
+    async ({ exts, folderPath }) => {
+      try { return payload({ files: await fsops.findByExtension(vaultDir, exts, folderPath ?? '') }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_block_ids',
+    {
+      description: 'List every Obsidian block id (^id) in a note, w/ line number.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.blockIds(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_bulk_rename',
+    {
+      description: 'Apply multiple rename/move pairs in one call. Returns per-pair status; failures do not abort the batch.',
+      inputSchema: { renames: z.array(z.object({ from: z.string(), to: z.string() })).min(1).max(200) },
+    },
+    async ({ renames }) => {
+      try {
+        const r = await fsops.bulkRename(vaultDir, renames);
+        for (const item of r) {
+          if (!item.ok) continue;
+          await deps.onNoteRemoved?.(item.from);
+          if (item.to.toLowerCase().endsWith('.md')) await deps.onNoteChanged?.(item.to);
+        }
+        return payload({ results: r });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_long_lines',
+    {
+      description: 'Notes containing at least one line longer than minLineLen chars. Sorted longest-line first.',
+      inputSchema: { minLineLen: z.number().int().positive().max(100_000), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ minLineLen, limit }) => {
+      try { return payload({ notes: await fsops.findLongLines(vaultDir, minLineLen, limit ?? 50) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_link_counts',
+    {
+      description: 'Outbound wikilink counts per note. Most-linking first.',
+      inputSchema: { limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ limit }) => payload({ counts: linkCountsPerNote(index.linkMap()).slice(0, limit ?? 50) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_inbound_ranking',
+    {
+      description: 'Notes ranked by inbound wikilink count. Most-linked first.',
+      inputSchema: { limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ limit }) => payload({ ranking: inboundRanking(index.linkMap()).slice(0, limit ?? 50) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_communities',
+    {
+      description: 'List Louvain communities + member counts (semantic clustering via the wikilink graph).',
+    },
+    async () => {
+      const { buildNoteGraph, detectCommunities } = await import('./note-graph.js');
+      const notes = [...index.linkMap().entries()].map(([path, links]) => ({ path, links }));
+      const graph = buildNoteGraph(notes);
+      const comm = detectCommunities(graph);
+      const counts = new Map<number, number>();
+      for (const c of comm.values()) counts.set(c, (counts.get(c) ?? 0) + 1);
+      const out = [...counts.entries()]
+        .map(([id, size]) => ({ communityId: id, size }))
+        .sort((a, b) => b.size - a.size);
+      return payload({ communities: out, total: out.length });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_freshness_report',
+    {
+      description: 'Combined freshness snapshot: most-recently-changed N + most-stale N, single call.',
+      inputSchema: { limit: z.number().int().positive().max(100).optional() },
+    },
+    async ({ limit }) => {
+      const cap = limit ?? 10;
+      const recent = await fsops.notesSince(vaultDir, 0, cap);
+      const stale = await fsops.staleNotes(vaultDir, 0, cap);
+      return payload({ recent, stale: stale.slice(0, cap) });
     },
   );
 

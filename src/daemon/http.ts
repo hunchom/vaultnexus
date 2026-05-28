@@ -89,6 +89,10 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_excerpt','vaultnexus_random_note','vaultnexus_recent_changes','vaultnexus_stale_notes',
         'vaultnexus_size_breakdown','vaultnexus_wikilink_completions','vaultnexus_replace_lines',
         'vaultnexus_unlinked_mentions','vaultnexus_find_long_notes','vaultnexus_dedupe_candidates',
+        // structural ops + ranking
+        'vaultnexus_split_note','vaultnexus_merge_notes','vaultnexus_find_by_extension',
+        'vaultnexus_block_ids','vaultnexus_bulk_rename','vaultnexus_find_long_lines',
+        'vaultnexus_link_counts','vaultnexus_inbound_ranking','vaultnexus_communities','vaultnexus_freshness_report',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience
