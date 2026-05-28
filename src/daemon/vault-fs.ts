@@ -313,7 +313,10 @@ export async function splitNote(
   await createFolder(vaultDir, folder);
   const created: string[] = [];
   for (const s of sections) {
-    const safe = s.title.replace(/[^\w\s.-]/g, '').trim().replace(/\s+/g, '-').slice(0, 80) || 'untitled';
+    // Strip leading dots + path separators → no '..' segment escapes outputFolder (Fix: review MEDIUM #1).
+    let safe = s.title.replace(/[^\w\s.-]/g, '').trim().replace(/\s+/g, '-').slice(0, 80);
+    safe = safe.replace(/^\.+/, '').replace(/\.+$/, '');
+    if (!safe) safe = 'untitled';
     const p = `${folder}/${safe}.md`;
     await createPage(vaultDir, p, s.body.join('\n'), { overwrite: true });
     created.push(p);
@@ -409,6 +412,7 @@ export async function bulkRename(
 }
 
 /** Notes w/ at least one line longer than N chars. Sorted by max line desc. */
+const LONGLINES_MAX_FILE_BYTES = 1_000_000;
 export async function findLongLines(
   vaultDir: string, minLineLen: number, limit: number = 50,
 ): Promise<Array<{ notePath: string; maxLineLen: number; line: number }>> {
@@ -416,6 +420,9 @@ export async function findLongLines(
   const files = await walkMarkdown(vaultDir);
   const out: Array<{ notePath: string; maxLineLen: number; line: number }> = [];
   for (const abs of files) {
+    // Skip oversized files → mirrors grepVault cap (Fix: review MEDIUM #2).
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > LONGLINES_MAX_FILE_BYTES) continue;
     const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
     let maxLen = 0; let at = 0;
     for (let i = 0; i < lines.length; i += 1) {
