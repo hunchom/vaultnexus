@@ -453,6 +453,102 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_get_partial',
+    {
+      description: 'Slice of a note by selector: heading section, frontmatter, or outline. kind=heading|frontmatter|outline.',
+      inputSchema: {
+        notePath: z.string(),
+        kind: z.enum(['heading', 'frontmatter', 'outline']),
+        text: z.string().optional(),
+      },
+    },
+    async ({ notePath, kind, text }) => {
+      try {
+        const sel = kind === 'heading' ? { kind: 'heading' as const, text: text ?? '' }
+          : kind === 'frontmatter' ? { kind: 'frontmatter' as const }
+          : { kind: 'outline' as const };
+        return payload(await fsops.getPartial(vaultDir, notePath, sel));
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_patch_section',
+    {
+      description: 'Replace the body of a heading section (heading line preserved). Re-indexes the note.',
+      inputSchema: { notePath: z.string(), heading: z.string(), newBody: z.string() },
+    },
+    async ({ notePath, heading, newBody }) => {
+      try {
+        const r = await fsops.patchHeadingSection(vaultDir, notePath, heading, newBody);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_periodic_note',
+    {
+      description: 'Get or create a periodic note: daily (YYYY-MM-DD.md), weekly (YYYY-Www.md), monthly (YYYY-MM.md), yearly (YYYY.md). Defaults to today.',
+      inputSchema: {
+        period: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+        date: z.string().optional(),
+        folder: z.string().optional(),
+        template: z.string().optional(),
+      },
+    },
+    async ({ period, date, folder, template }) => {
+      const d = date ? new Date(date) : new Date();
+      if (Number.isNaN(d.getTime())) return errPayload(`bad date: ${date}`);
+      const yyyy = d.getUTCFullYear();
+      const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(d.getUTCDate()).padStart(2, '0');
+      // ISO week: Thursday-of-the-week trick → reliable across years
+      const weekOf = (dt: Date): string => {
+        const t = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+        const day = (t.getUTCDay() + 6) % 7; // Mon = 0
+        t.setUTCDate(t.getUTCDate() - day + 3);
+        const jan4 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+        const week = 1 + Math.round(((t.getTime() - jan4.getTime()) / 86_400_000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+        return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+      };
+      const stem = period === 'daily' ? `${yyyy}-${mm}-${dd}`
+        : period === 'weekly' ? weekOf(d)
+        : period === 'monthly' ? `${yyyy}-${mm}`
+        : `${yyyy}`;
+      const notePath = (folder ? `${folder.replace(/\/$/, '')}/` : '') + `${stem}.md`;
+      try {
+        const r = await fsops.readPage(vaultDir, notePath);
+        return payload({ ...r, period, stem, created: false });
+      } catch {
+        const initial = template ?? `# ${stem}\n\n`;
+        const r = await fsops.createPage(vaultDir, notePath, initial);
+        await deps.onNoteChanged?.(notePath);
+        return payload({ ...r, period, stem, created: true, text: initial });
+      }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_fetch_url',
+    {
+      description: 'HTTP GET a URL → trimmed markdown. Useful for inline web research that ends up in a note.',
+      inputSchema: { url: z.string().regex(/^https?:\/\//), maxBytes: z.number().int().positive().optional() },
+    },
+    async ({ url, maxBytes }) => {
+      try {
+        const r = await fetch(url, { headers: { 'user-agent': 'vaultnexus/0.1' } });
+        if (!r.ok) return errPayload(`HTTP ${r.status}`);
+        const buf = await r.text();
+        const cap = maxBytes ?? 200_000;
+        const text = buf.length > cap ? buf.slice(0, cap) + '\n\n... (truncated)' : buf;
+        return payload({ url, status: r.status, contentType: r.headers.get('content-type') ?? '', bytes: buf.length, text });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_daily_note',
     {
       description: 'Get or create a daily note in YYYY-MM-DD.md format. Defaults to today. Returns existing content if file exists, otherwise creates it w/ optional template.',

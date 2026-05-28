@@ -195,6 +195,82 @@ export async function renamePath(
   return { from, to };
 }
 
+/** Fetch a sub-slice of a note by selector: heading text, block-id line, frontmatter, or outline. */
+export async function getPartial(
+  vaultDir: string,
+  notePath: string,
+  selector: { kind: 'heading'; text: string } | { kind: 'frontmatter' } | { kind: 'outline' },
+): Promise<{ notePath: string; kind: string; text: string }> {
+  const abs = safeJoin(vaultDir, notePath);
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  if (selector.kind === 'frontmatter') {
+    const m = /^---\n([\s\S]*?)\n---\n?/.exec(raw);
+    return { notePath, kind: 'frontmatter', text: m ? m[1] : '' };
+  }
+  if (selector.kind === 'outline') {
+    const lines = raw.split(/\r?\n/);
+    const headings = lines
+      .map((l) => /^(#{1,6})\s+(.+?)\s*$/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => `${m[1]} ${m[2]}`);
+    return { notePath, kind: 'outline', text: headings.join('\n') };
+  }
+  // heading section: from matching heading to next heading at same-or-shallower depth (or EOF)
+  const lines = raw.split(/\r?\n/);
+  let startLine = -1;
+  let startDepth = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i]);
+    if (m && m[2].trim() === selector.text.trim()) {
+      startLine = i;
+      startDepth = m[1].length;
+      break;
+    }
+  }
+  if (startLine < 0) throw new VaultFsError(`heading not found: ${selector.text}`, 'ENOTFOUND');
+  let endLine = lines.length;
+  for (let i = startLine + 1; i < lines.length; i += 1) {
+    const m = /^(#{1,6})\s+/.exec(lines[i]);
+    if (m && m[1].length <= startDepth) { endLine = i; break; }
+  }
+  return { notePath, kind: 'heading', text: lines.slice(startLine, endLine).join('\n') };
+}
+
+/** Patch a heading section: replace its body (keep the heading line). */
+export async function patchHeadingSection(
+  vaultDir: string, notePath: string, headingText: string, newBody: string,
+): Promise<{ notePath: string; bytes: number; replacedLines: number }> {
+  const abs = safeJoin(vaultDir, notePath);
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const lines = raw.split(/\r?\n/);
+  let startLine = -1;
+  let startDepth = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i]);
+    if (m && m[2].trim() === headingText.trim()) {
+      startLine = i;
+      startDepth = m[1].length;
+      break;
+    }
+  }
+  if (startLine < 0) throw new VaultFsError(`heading not found: ${headingText}`, 'ENOTFOUND');
+  let endLine = lines.length;
+  for (let i = startLine + 1; i < lines.length; i += 1) {
+    const m = /^(#{1,6})\s+/.exec(lines[i]);
+    if (m && m[1].length <= startDepth) { endLine = i; break; }
+  }
+  const before = lines.slice(0, startLine + 1).join('\n');
+  const after = lines.slice(endLine).join('\n');
+  const next = before + '\n\n' + newBody.trimEnd() + (after.length > 0 ? '\n\n' + after : '\n');
+  const buf = Buffer.from(next, 'utf8');
+  await writeFile(abs, buf);
+  return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
+}
+
 /** Rename one heading by exact text match. Heading depth preserved. */
 export async function renameHeading(
   vaultDir: string, notePath: string, oldText: string, newText: string,

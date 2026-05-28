@@ -58,7 +58,9 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_delete_page','vaultnexus_delete_folder',
         'vaultnexus_move','vaultnexus_copy_page',
         // discovery + convenience
-        'vaultnexus_find_by_tag','vaultnexus_broken_links','vaultnexus_daily_note',
+        'vaultnexus_find_by_tag','vaultnexus_broken_links',
+        'vaultnexus_get_partial','vaultnexus_patch_section',
+        'vaultnexus_daily_note','vaultnexus_periodic_note','vaultnexus_fetch_url',
       ],
     });
   });

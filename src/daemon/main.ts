@@ -147,8 +147,8 @@ async function main(): Promise<void> {
         if (filename.startsWith('.')) return;
         if (filename.includes('/.')) return; // skip .obsidian/, .trash/, etc.
         if (!filename.toLowerCase().endsWith('.md')) return;
-        const notePath = prel(vaultDir, prel(vaultDir, filename) === filename ? filename : filename);
-        const key = notePath;
+        // filename from recursive fs.watch is vault-relative — use as-is.
+        const key = filename;
         const prev = debounce.get(key);
         if (prev) clearTimeout(prev);
         debounce.set(key, setTimeout(async () => {
