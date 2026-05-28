@@ -619,7 +619,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   server.registerTool(
     'vaultnexus_replace_lines',
     {
-      description: 'Replace lines [startLine..endLine] in a note (1-indexed, inclusive). Re-indexes.',
+      description: 'Replace lines [startLine..endLine] in a note (1-indexed, inclusive). newText may contain newlines; file line count adjusts accordingly. Re-indexes.',
       inputSchema: { notePath: z.string(), startLine: z.number().int().positive(), endLine: z.number().int().positive(), newText: z.string() },
     },
     async ({ notePath, startLine, endLine, newText }) => {

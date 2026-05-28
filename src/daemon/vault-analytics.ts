@@ -91,7 +91,10 @@ export async function unlinkedMentions(
   limit: number = 200,
 ): Promise<Array<{ from: string; mention: string; line: number; lineText: string }>> {
   const { walkMarkdown } = await import('./indexer.js');
-  const titles = notePaths.map((p) => p.replace(/\.md$/i, '').split('/').pop() ?? '').filter(Boolean);
+  // Cap title length → defense-in-depth vs future paths where titles come from untrusted input.
+  const titles = notePaths
+    .map((p) => p.replace(/\.md$/i, '').split('/').pop() ?? '')
+    .filter((t) => t && t.length <= 256);
   const titlesSet = new Set(titles.map((t) => t.toLowerCase()));
   const files = await walkMarkdown(vaultDir);
   const out: Array<{ from: string; mention: string; line: number; lineText: string }> = [];

@@ -363,6 +363,7 @@ export async function sizeBreakdown(
     const walk = async (d: string): Promise<void> => {
       for (const ent of await readdir(d, { withFileTypes: true })) {
         if (ent.name.startsWith('.')) continue;
+        if (ent.isSymbolicLink()) continue; // explicit skip → no symlink follow regardless of Node version.
         const p = join(d, ent.name);
         if (ent.isDirectory()) await walk(p);
         else if (ent.isFile() && extname(ent.name).toLowerCase() === '.md') {
