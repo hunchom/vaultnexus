@@ -227,7 +227,7 @@ docker compose exec ollama ollama pull nomic-embed-text
 
 ## MCP tools
 
-**35 tools** across retrieval, reasoning, vault analytics, file I/O, and history. Every tool returns a JSON payload. Cited tools include `notePath`, `headingPath`, `byteStart`, `byteEnd` on every hit.
+**45 tools** across retrieval, reasoning, vault analytics, file I/O, history, frontmatter, grep, attachments, diff. Every tool returns a JSON payload. Cited tools include `notePath`, `headingPath`, `byteStart`, `byteEnd` on every hit.
 
 #### Retrieval
 
@@ -268,7 +268,14 @@ docker compose exec ollama ollama pull nomic-embed-text
 | `vaultnexus_find_by_tag` | Notes containing a `#tag` (case-insensitive, strict). |
 | `vaultnexus_broken_links` | Wikilinks pointing at unresolved targets. |
 | `vaultnexus_get_partial` | Slice of a note by heading section, frontmatter, or outline. |
-| `vaultnexus_fetch_url` | HTTP GET a URL → trimmed markdown (200KB cap). |
+| `vaultnexus_get_frontmatter` | Parsed YAML frontmatter → JSON. |
+| `vaultnexus_query_frontmatter` | Find notes by frontmatter key=value / list-membership. |
+| `vaultnexus_grep` | Plain-text or regex search w/ line numbers + context. |
+| `vaultnexus_word_count` | Words / chars / lines / bytes for a note. |
+| `vaultnexus_list_attachments` | Non-markdown files under a vault folder (images, PDFs). |
+| `vaultnexus_diff_notes` | Line-set diff between two notes (200-line cap each side). |
+| `vaultnexus_list_bookmarks` | Read `.obsidian/bookmarks.json` → flat list. |
+| `vaultnexus_fetch_url` | HTTP GET → text. Blocks private + cloud-metadata IPs. |
 
 #### Vault write (re-indexes immediately)
 
@@ -282,8 +289,11 @@ docker compose exec ollama ollama pull nomic-embed-text
 | `vaultnexus_rename_heading` | Rename one heading inside a note (depth preserved). |
 | `vaultnexus_patch_section` | Replace the body of a heading section (heading line preserved). |
 | `vaultnexus_search_replace_vault` | Bulk find/replace across notes (optional `pathPrefix` filter). |
+| `vaultnexus_set_frontmatter` | Replace or insert the YAML frontmatter block. |
 | `vaultnexus_daily_note` | Get or create `YYYY-MM-DD.md` (optional folder + template). |
 | `vaultnexus_periodic_note` | Daily / weekly (`YYYY-Www`) / monthly / yearly periodic notes. |
+| `vaultnexus_append_to_periodic` | Append text to today's daily / this-week's weekly / etc. |
+| `vaultnexus_execute_template` | Apply Templater-style `{{date}}/{{title}}/{{var}}` substitution. |
 | `vaultnexus_delete_page` | Soft-delete (moves to `<vault>/.trash/<timestamp>/`). |
 | `vaultnexus_delete_folder` | Soft-delete a folder. Requires `force: true` for non-empty. |
 | `vaultnexus_move` | Rename / move a note or folder within the vault. |
