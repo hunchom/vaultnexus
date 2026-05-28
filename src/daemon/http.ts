@@ -108,6 +108,12 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_add_tag_to_note','vaultnexus_remove_tag',
         'vaultnexus_find_tasks','vaultnexus_toggle_task',
         'vaultnexus_find_dataview_blocks','vaultnexus_count_notes','vaultnexus_reindex_note',
+        // date + path filters + images + URLs + density + circular + distribution + status + today
+        'vaultnexus_notes_in_date_range','vaultnexus_notes_by_path_prefix',
+        'vaultnexus_extract_image_refs','vaultnexus_extract_external_urls',
+        'vaultnexus_replace_first_line','vaultnexus_word_density',
+        'vaultnexus_find_circular_links','vaultnexus_frontmatter_distribution',
+        'vaultnexus_note_status','vaultnexus_today',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience

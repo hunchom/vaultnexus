@@ -551,6 +551,121 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_notes_in_date_range',
+    {
+      description: 'Notes modified between two unix-ms timestamps. Newest first; limit cap default 100.',
+      inputSchema: { fromMs: z.number().int().nonnegative(), toMs: z.number().int().positive(), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ fromMs, toMs, limit }) => {
+      try { return payload({ notes: await fsops.notesInDateRange(vaultDir, fromMs, toMs, limit ?? 100) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_notes_by_path_prefix',
+    {
+      description: 'Indexed notes whose path starts with prefix. Flat list, no FS walk.',
+      inputSchema: { pathPrefix: z.string().min(1), limit: z.number().int().positive().max(1000).optional() },
+    },
+    async ({ pathPrefix, limit }) => payload({ notes: fsops.notesByPathPrefix(index.notePaths(), pathPrefix, limit ?? 200) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_image_refs',
+    {
+      description: 'Image references in a note: embeds ![[X.png]] + markdown ![alt](url.png). Common image extensions only.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractImageRefs(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_external_urls',
+    {
+      description: 'External http(s) URLs referenced in a note, deduped + ordered by first appearance.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractExternalUrls(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_replace_first_line',
+    {
+      description: 'Replace just the first line of a note. Re-indexes.',
+      inputSchema: { notePath: z.string(), newLine: z.string() },
+    },
+    async ({ notePath, newLine }) => {
+      try {
+        const r = await fsops.replaceFirstLine(vaultDir, notePath, newLine);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_word_density',
+    {
+      description: 'Words per heading section in a note. Reveals where text mass lives.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.wordDensityPerSection(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_circular_links',
+    { description: 'Pairs of notes that mutually wikilink each other. {a, b} pairs where a < b alphabetically.' },
+    async () => payload({ pairs: fsops.findCircularLinks(index.linkMap()) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_frontmatter_distribution',
+    {
+      description: 'Across the vault, count how many times each value appears under a frontmatter key. Arrays expanded.',
+      inputSchema: { key: z.string().regex(/^[A-Za-z_][\w-]*$/), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ key, limit }) => {
+      try {
+        const dist = await fsops.frontmatterValueDistribution(vaultDir, index.notePaths(), key);
+        return payload({ key, distribution: limit ? dist.slice(0, limit) : dist });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_note_status',
+    {
+      description: 'Single-call status snapshot for a note: bytes, words, lines, headings, tasks, tags, outbound link count.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.noteStatusSummary(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_today',
+    { description: 'Notes modified since midnight UTC today. Convenience shortcut over notes_in_date_range.' },
+    async () => {
+      const t = new Date();
+      const midnight = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+      try { return payload({ notes: await fsops.notesInDateRange(vaultDir, midnight, Date.now(), 200) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_set_property',
     {
       description: 'Set one frontmatter key on a note. Preserves other keys. Inserts the --- block if missing. Re-indexes.',

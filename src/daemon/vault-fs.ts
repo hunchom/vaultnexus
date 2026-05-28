@@ -292,6 +292,170 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Notes modified between two unix-ms timestamps. */
+export async function notesInDateRange(
+  vaultDir: string, fromMs: number, toMs: number, limit: number = 100,
+): Promise<Array<{ notePath: string; mtimeMs: number; bytes: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; mtimeMs: number; bytes: number }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s) continue;
+    if (s.mtimeMs < fromMs || s.mtimeMs > toMs) continue;
+    out.push({ notePath: relative(vaultDir, abs), mtimeMs: s.mtimeMs, bytes: s.size });
+  }
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out.slice(0, limit);
+}
+
+/** Notes whose path starts with prefix. Cheap flat list w/o re-walking the FS. */
+export function notesByPathPrefix(
+  notePaths: string[], pathPrefix: string, limit: number = 200,
+): string[] {
+  const p = pathPrefix.replace(/^\/+/, '');
+  return notePaths.filter((np) => np.startsWith(p)).slice(0, limit);
+}
+
+/** Image refs in a note: ![[X.png]] embeds + ![alt](url) markdown. */
+export async function extractImageRefs(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; embeds: string[]; markdown: Array<{ alt: string; src: string }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const embeds = [...new Set(
+    [...text.matchAll(/!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp|svg|bmp))(?:[|#][^\]]*)?\]\]/gi)].map((m) => m[1]),
+  )];
+  const markdown = [...text.matchAll(/!\[([^\]]*)\]\(([^)]+\.(?:png|jpe?g|gif|webp|svg|bmp))\)/gi)]
+    .map((m) => ({ alt: m[1], src: m[2] }));
+  return { notePath, embeds, markdown };
+}
+
+/** External http/https URLs referenced in a note. Deduped + ordered by first appearance. */
+export async function extractExternalUrls(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; urls: string[] }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // Markdown link href OR bare URL in text.
+  const mdRe = /\[[^\]]+\]\((https?:\/\/[^)]+)\)/g;
+  const bareRe = /(?<![("\[])\b(https?:\/\/[^\s)<>"']+)/g;
+  for (const m of text.matchAll(mdRe)) {
+    if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }
+  }
+  for (const m of text.matchAll(bareRe)) {
+    if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }
+  }
+  return { notePath, urls: out };
+}
+
+/** Replace just the first line of a note (typically the title heading). */
+export async function replaceFirstLine(
+  vaultDir: string, notePath: string, newLine: string,
+): Promise<{ notePath: string; bytes: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const lines = raw.split(/\r?\n/);
+  lines[0] = newLine.split(/\r?\n/)[0];
+  const buf = Buffer.from(lines.join('\n'), 'utf8');
+  await writeFile(abs, buf);
+  return { notePath, bytes: buf.length };
+}
+
+/** Word count per heading section in a note. Reveals where mass lives. */
+export async function wordDensityPerSection(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; sections: Array<{ heading: string; depth: number; words: number }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const sections: Array<{ heading: string; depth: number; words: number }> = [];
+  let cur: { heading: string; depth: number; words: number } | null = { heading: '(preamble)', depth: 0, words: 0 };
+  for (const line of lines) {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (m) {
+      if (cur && cur.heading !== '(preamble)' || (cur && cur.words > 0)) sections.push(cur);
+      cur = { heading: m[2].trim(), depth: m[1].length, words: 0 };
+    } else if (cur) {
+      cur.words += line.split(/\s+/).filter(Boolean).length;
+    }
+  }
+  if (cur && (cur.heading !== '(preamble)' || cur.words > 0)) sections.push(cur);
+  return { notePath, sections };
+}
+
+/** Find wikilink cycles. Pairs of notes that mutually link to each other. */
+export function findCircularLinks(
+  noteLinks: Map<string, string[]>,
+): Array<{ a: string; b: string }> {
+  const allNotes = [...noteLinks.keys()];
+  const baseToPath = new Map<string, string>();
+  for (const p of allNotes) {
+    const base = p.replace(/\.md$/i, '').split('/').pop()?.toLowerCase() ?? '';
+    if (!baseToPath.has(base)) baseToPath.set(base, p);
+  }
+  const linksOut = new Map<string, Set<string>>();
+  for (const [from, targets] of noteLinks) {
+    const set = new Set<string>();
+    for (const t of targets) {
+      const hit = baseToPath.get(t.toLowerCase());
+      if (hit && hit !== from) set.add(hit);
+    }
+    linksOut.set(from, set);
+  }
+  const pairs: Array<{ a: string; b: string }> = [];
+  const seen = new Set<string>();
+  for (const [a, outs] of linksOut) {
+    for (const b of outs) {
+      if (a >= b) continue;
+      const back = linksOut.get(b);
+      if (back && back.has(a)) {
+        const k = `${a}|${b}`;
+        if (!seen.has(k)) { seen.add(k); pairs.push({ a, b }); }
+      }
+    }
+  }
+  return pairs;
+}
+
+/** Distribution of values seen under a frontmatter key across the vault. */
+export async function frontmatterValueDistribution(
+  vaultDir: string, notePaths: string[], key: string,
+): Promise<Array<{ value: string; count: number }>> {
+  if (!/^[A-Za-z_][\w-]*$/.test(key)) throw new VaultFsError(`invalid key: ${key}`, 'EBAD');
+  const counts = new Map<string, number>();
+  for (const np of notePaths) {
+    try {
+      const fm = (await getFrontmatter(vaultDir, np)).frontmatter;
+      const v = fm[key];
+      if (v === undefined) continue;
+      const arr = Array.isArray(v) ? v : [v];
+      for (const x of arr) {
+        const s = String(x);
+        counts.set(s, (counts.get(s) ?? 0) + 1);
+      }
+    } catch { /* skip */ }
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => (b.count - a.count) || a.value.localeCompare(b.value));
+}
+
+/** Per-note combined snapshot — one-call status for a note. Smaller than note_meta. */
+export async function noteStatusSummary(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; bytes: number; words: number; lines: number; headings: number; tasks: number; tags: number; outboundLinks: number }> {
+  const { text, bytes } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const headings = lines.filter((l) => /^#{1,6}\s+/.test(l)).length;
+  const tasks = lines.filter((l) => /^\s*-\s+\[[ xX]\]\s+/.test(l)).length;
+  const tags = [...new Set([...text.matchAll(/(?:^|\s)#([A-Za-z0-9][\w/-]*)/gm)].map((m) => m[1]))].length;
+  const outboundLinks = [...new Set([...text.matchAll(/(?<!!)\[\[([^\]|#]+)/g)].map((m) => m[1]))].length;
+  return { notePath, bytes, words, lines: lines.length, headings, tasks, tags, outboundLinks };
+}
+
 /** Set one frontmatter key. Inserts FM block if missing, preserves other keys. */
 export async function setProperty(
   vaultDir: string, notePath: string, key: string, value: unknown,
