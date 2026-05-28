@@ -292,6 +292,175 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** SHA-256 hash of a note's bytes → cheap dedup key + change detection. */
+export async function noteHash(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; bytes: number; sha256: string }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let buf;
+  try { buf = await readFile(abs); } catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const { createHash } = await import('node:crypto');
+  return { notePath, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex') };
+}
+
+/** Exact-content duplicates across the vault. Returns groups of notes that share identical SHA-256. */
+export async function findExactDuplicates(
+  vaultDir: string,
+): Promise<Array<{ sha256: string; notes: string[]; bytes: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const { createHash } = await import('node:crypto');
+  const files = await walkMarkdown(vaultDir);
+  const groups = new Map<string, { notes: string[]; bytes: number }>();
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const buf = await readFile(abs);
+    const sha = createHash('sha256').update(buf).digest('hex');
+    const rel = relative(vaultDir, abs);
+    const g = groups.get(sha) ?? { notes: [], bytes: buf.length };
+    g.notes.push(rel);
+    groups.set(sha, g);
+  }
+  return [...groups.entries()]
+    .filter(([, g]) => g.notes.length >= 2)
+    .map(([sha256, g]) => ({ sha256, notes: g.notes.sort(), bytes: g.bytes }))
+    .sort((a, b) => b.notes.length - a.notes.length);
+}
+
+/** Notes with body-only word count under threshold (frontmatter stripped). */
+export async function findEmptyNotes(
+  vaultDir: string, maxBodyWords: number = 5,
+): Promise<Array<{ notePath: string; bodyWords: number; bytes: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; bodyWords: number; bytes: number }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const raw = (await readFile(abs)).toString('utf8');
+    const body = raw.replace(/^---\n[\s\S]*?\n---\n?/, '').replace(/#{1,6}\s+.+/g, '').trim();
+    const words = body.split(/\s+/).filter(Boolean).length;
+    if (words <= maxBodyWords) out.push({ notePath: relative(vaultDir, abs), bodyWords: words, bytes: s.size });
+  }
+  out.sort((a, b) => a.bodyWords - b.bodyWords);
+  return out;
+}
+
+/** Notes that lack any frontmatter block. */
+export async function findNotesWithoutFrontmatter(
+  vaultDir: string,
+): Promise<Array<{ notePath: string; bytes: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; bytes: number }> = [];
+  for (const abs of files) {
+    const buf = await readFile(abs).catch(() => null);
+    if (!buf) continue;
+    const head = buf.subarray(0, 64).toString('utf8');
+    if (!/^---\n/.test(head)) {
+      out.push({ notePath: relative(vaultDir, abs), bytes: buf.length });
+    }
+  }
+  return out.sort((a, b) => a.notePath.localeCompare(b.notePath));
+}
+
+/** Notes whose frontmatter contains a given key (any value). */
+export async function findNotesWithProperty(
+  vaultDir: string, key: string,
+): Promise<Array<{ notePath: string; value: unknown }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; value: unknown }> = [];
+  for (const abs of files) {
+    const rel = relative(vaultDir, abs);
+    try {
+      const fm = (await getFrontmatter(vaultDir, rel)).frontmatter;
+      if (key in fm) out.push({ notePath: rel, value: fm[key] });
+    } catch { /* skip */ }
+  }
+  return out.sort((a, b) => a.notePath.localeCompare(b.notePath));
+}
+
+/** Wikilink audit: every wikilink target across vault + resolved? */
+export async function wikilinkAudit(
+  noteLinks: Map<string, string[]>,
+): Promise<{ resolved: number; unresolved: Array<{ from: string; target: string }>; counts: Record<string, number> }> {
+  const allNotes = [...noteLinks.keys()];
+  const baseNames = new Set(allNotes.map((p) => p.replace(/\.md$/i, '').split('/').pop()?.toLowerCase() ?? ''));
+  const fullPaths = new Set(allNotes.map((p) => p.toLowerCase()));
+  const counts: Record<string, number> = {};
+  const unresolved: Array<{ from: string; target: string }> = [];
+  let resolved = 0;
+  for (const [from, targets] of noteLinks) {
+    for (const t of targets) {
+      counts[t] = (counts[t] ?? 0) + 1;
+      const tLower = t.toLowerCase();
+      const ok = baseNames.has(tLower) || fullPaths.has(tLower) || fullPaths.has(`${tLower}.md`);
+      if (ok) resolved += 1;
+      else unresolved.push({ from, target: t });
+    }
+  }
+  return { resolved, unresolved, counts };
+}
+
+/** Archive a note: move to an archive folder + add an archived: <date> frontmatter key. */
+export async function archiveNote(
+  vaultDir: string, notePath: string, opts: { archiveFolder?: string } = {},
+): Promise<{ from: string; to: string }> {
+  const folder = opts.archiveFolder ?? 'Archive';
+  await createFolder(vaultDir, folder);
+  const base = notePath.split('/').pop() ?? notePath;
+  const to = `${folder}/${base}`;
+  await renamePath(vaultDir, notePath, to);
+  try {
+    const fm = (await getFrontmatter(vaultDir, to)).frontmatter;
+    const today = new Date().toISOString().slice(0, 10);
+    fm.archived = today;
+    await setFrontmatter(vaultDir, to, fm);
+  } catch { /* if frontmatter parse fails, leave content alone */ }
+  return { from: notePath, to };
+}
+
+/** Remove empty subfolders under root. Returns paths pruned. */
+export async function pruneEmptyFolders(
+  vaultDir: string, root: string = '',
+): Promise<{ pruned: string[] }> {
+  const start = await safeRealpath(vaultDir, safeJoin(vaultDir, root));
+  const pruned: string[] = [];
+  const walk = async (d: string): Promise<boolean> => {
+    let entries;
+    try { entries = await readdir(d, { withFileTypes: true }); } catch { return false; }
+    const kids = entries.filter((e) => !e.name.startsWith('.'));
+    let nonEmpty = false;
+    for (const e of kids) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) {
+        const empty = !(await walk(p));
+        if (!empty) nonEmpty = true;
+      } else nonEmpty = true;
+    }
+    if (!nonEmpty && d !== start) {
+      // rm w/ recursive=false rejects dirs on darwin → use rmdir (we already proved it's empty).
+      const { rmdir } = await import('node:fs/promises');
+      await rmdir(d).catch(() => undefined);
+      pruned.push(relative(vaultDir, d));
+      return false;
+    }
+    return true;
+  };
+  await walk(start);
+  return { pruned: pruned.sort() };
+}
+
+/** GPT-tokenizer token count (BPE) for a note. */
+export async function tokenCount(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; tokens: number; bytes: number }> {
+  const { text, bytes } = await readPage(vaultDir, notePath);
+  const { encode } = await import('gpt-tokenizer');
+  return { notePath, tokens: encode(text).length, bytes };
+}
+
 /** Extract every link from a note: wikilinks [[X]], markdown [text](url), embeds ![[X]]. */
 export async function extractLinks(
   vaultDir: string, notePath: string,

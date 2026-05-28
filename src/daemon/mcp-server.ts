@@ -551,6 +551,106 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_note_hash',
+    {
+      description: 'SHA-256 of a note. Cheap change-detection + dedup key.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.noteHash(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_exact_duplicates',
+    { description: 'Groups of notes with identical SHA-256 content. Groups of 2+, sorted by group size.' },
+    async () => {
+      try { return payload({ groups: await fsops.findExactDuplicates(vaultDir) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_empty_notes',
+    {
+      description: 'Notes with body-only word count under threshold (frontmatter + heading-only lines stripped). Default 5.',
+      inputSchema: { maxBodyWords: z.number().int().nonnegative().max(100).optional() },
+    },
+    async ({ maxBodyWords }) => {
+      try { return payload({ notes: await fsops.findEmptyNotes(vaultDir, maxBodyWords ?? 5) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_notes_without_frontmatter',
+    { description: 'Notes that lack any leading --- frontmatter block.' },
+    async () => {
+      try { return payload({ notes: await fsops.findNotesWithoutFrontmatter(vaultDir) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_notes_with_property',
+    {
+      description: 'Notes whose frontmatter contains the given key (any value). Returns notePath + value.',
+      inputSchema: { key: z.string().regex(/^[A-Za-z_][\w-]*$/) },
+    },
+    async ({ key }) => {
+      try { return payload({ notes: await fsops.findNotesWithProperty(vaultDir, key) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_wikilink_audit',
+    { description: 'Vault-wide wikilink resolution audit. Returns counts + unresolved [{from, target}] + per-target reference counts.' },
+    async () => payload(await fsops.wikilinkAudit(index.linkMap())),
+  );
+
+  server.registerTool(
+    'vaultnexus_archive_note',
+    {
+      description: 'Move a note into an Archive folder + add archived: <date> to its frontmatter. Re-indexes.',
+      inputSchema: { notePath: z.string(), archiveFolder: z.string().optional() },
+    },
+    async ({ notePath, archiveFolder }) => {
+      try {
+        const r = await fsops.archiveNote(vaultDir, notePath, { archiveFolder });
+        await deps.onNoteRemoved?.(notePath);
+        await deps.onNoteChanged?.(r.to);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_prune_empty_folders',
+    {
+      description: 'Recursively rmdir empty folders under root. Skips dotfolders + the root itself.',
+      inputSchema: { root: z.string().optional() },
+    },
+    async ({ root }) => {
+      try { return payload(await fsops.pruneEmptyFolders(vaultDir, root ?? '')); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_token_count',
+    {
+      description: 'BPE token count (gpt-tokenizer) for a note. Useful for context-window planning.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.tokenCount(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_extract_links',
     {
       description: 'Pull every link from a note — wikilinks [[X]], embeds ![[X]], markdown [text](url). Unique-deduped wikilinks/embeds; markdown links keep duplicates.',

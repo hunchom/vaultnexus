@@ -98,6 +98,11 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_convert_links','vaultnexus_render_toc',
         'vaultnexus_find_by_size','vaultnexus_find_todos','vaultnexus_find_unreferenced_attachments',
         'vaultnexus_bulk_frontmatter','vaultnexus_index_export',
+        // hash + dedup + audit + hygiene
+        'vaultnexus_note_hash','vaultnexus_find_exact_duplicates',
+        'vaultnexus_find_empty_notes','vaultnexus_find_notes_without_frontmatter',
+        'vaultnexus_find_notes_with_property','vaultnexus_wikilink_audit',
+        'vaultnexus_archive_note','vaultnexus_prune_empty_folders','vaultnexus_token_count',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience
