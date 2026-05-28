@@ -5,6 +5,20 @@ Format adapted from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) —
 
 ## [Unreleased]
 
+### Added
+
+- **MCP tool surface expanded 8 → 26.** New tools:
+  - Retrieval: `vaultnexus_neighbors`
+  - Vault read + analytics: `vaultnexus_list`, `vaultnexus_read_page`, `vaultnexus_outline`, `vaultnexus_stats`, `vaultnexus_tags`, `vaultnexus_recent`, `vaultnexus_orphans`, `vaultnexus_link_graph`
+  - Vault write: `vaultnexus_create_page`, `vaultnexus_create_folder`, `vaultnexus_append_to_page`, `vaultnexus_insert_after_heading`, `vaultnexus_replace_in_page`, `vaultnexus_delete_page`, `vaultnexus_delete_folder`, `vaultnexus_move`, `vaultnexus_copy_page`
+- **Live re-indexing via `fs.watch`** — external writes (Obsidian saving a note) trigger debounced reindex (250ms). Tool-side writes synchronously reindex before returning.
+- **Safe FS layer** — every write/delete tool routes through `safeJoin()` which rejects `..`/absolute paths so the surface stays bounded to the vault root.
+- **Soft-delete** — deletes move into `<vault>/.trash/<timestamp>/` instead of unlinking.
+
+### Fixed
+
+- Race where a tool-side write + the subsequent `fs.watch` event both triggered `reindexNote()` against the same path → could shift array indices mid-traversal in a concurrent `vaultnexus_reason` call. Fixed via a per-path self-write suppression window.
+
 ## [0.1.0] — 2026-05-27
 
 First public release.

@@ -227,18 +227,60 @@ docker compose exec ollama ollama pull nomic-embed-text
 
 ## MCP tools
 
-Every tool returns a JSON payload. Every payload includes citations: `notePath`, `headingPath`, `byteStart`, `byteEnd`.
+**26 tools** across retrieval, reasoning, vault analytics, file I/O, and history. Every tool returns a JSON payload. Cited tools include `notePath`, `headingPath`, `byteStart`, `byteEnd` on every hit.
+
+#### Retrieval
 
 | Tool | Purpose |
 |---|---|
-| `vaultnexus_ping` | Health probe. Returns `{status, version}`. |
-| `vaultnexus_search` | Hybrid semantic + keyword search. Returns ranked cited chunks. |
+| `vaultnexus_ping` | Health + version + embedder id. |
+| `vaultnexus_search` | Hybrid semantic + lexical search. Ranked cited chunks. |
 | `vaultnexus_bridges` | Cross-community bridge pairs from the wikilink graph. |
-| `vaultnexus_trace` | Multi-hop reasoning chain over the retrieval graph. |
-| `vaultnexus_reason` | Composed answer with inline citations (requires chat model). |
+| `vaultnexus_neighbors` | Semantic neighbors of a whole note. |
+
+#### Reasoning
+
+| Tool | Purpose |
+|---|---|
+| `vaultnexus_trace` | Ordered citation chain (seed → wikilink + kNN hops). |
+| `vaultnexus_reason` | Cited natural-language answer composed over the trace. |
+
+#### History + forecasts
+
+| Tool | Purpose |
+|---|---|
 | `vaultnexus_history` | Git revisions for a note (vault must be a git repo). |
 | `vaultnexus_recall_history` | Time-ordered narration of a note's evolution. |
-| `vaultnexus_forecasts` | Mined `[forecast: ... by YYYY-MM-DD]` ledger entries from the vault. |
+| `vaultnexus_forecasts` | `[forecast: ... by YYYY-MM-DD]` ledger w/ Brier score. |
+
+#### Vault read + analytics
+
+| Tool | Purpose |
+|---|---|
+| `vaultnexus_list` | List folders + notes in a vault-relative path. |
+| `vaultnexus_read_page` | Read a note (optional byte slice). |
+| `vaultnexus_outline` | Heading tree of a note. |
+| `vaultnexus_stats` | Notes / chunks / bytes / embedder / chat model. |
+| `vaultnexus_tags` | `#tag` occurrence counts. |
+| `vaultnexus_recent` | Most-recently-modified notes. |
+| `vaultnexus_orphans` | Notes with no inbound wikilinks. |
+| `vaultnexus_link_graph` | Inbound + outbound wikilinks for a note. |
+
+#### Vault write (re-indexes immediately)
+
+| Tool | Purpose |
+|---|---|
+| `vaultnexus_create_page` | Write a new note. Refuses overwrite unless `overwrite: true`. |
+| `vaultnexus_create_folder` | `mkdir -p` under the vault. |
+| `vaultnexus_append_to_page` | Append text to a note. |
+| `vaultnexus_insert_after_heading` | Insert text after an exact heading match. |
+| `vaultnexus_replace_in_page` | Literal find/replace (`all: true` for global). |
+| `vaultnexus_delete_page` | Soft-delete (moves to `<vault>/.trash/<timestamp>/`). |
+| `vaultnexus_delete_folder` | Soft-delete a folder. Requires `force: true` for non-empty. |
+| `vaultnexus_move` | Rename / move a note or folder within the vault. |
+| `vaultnexus_copy_page` | Duplicate a note to a new path. |
+
+All write tools are scoped under the configured vault root — `safeJoin()` rejects path traversal via `..` or absolute paths. External writes (Obsidian saving a note) are picked up automatically via debounced `fs.watch`.
 
 ---
 
