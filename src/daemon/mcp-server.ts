@@ -551,6 +551,127 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_extract_links',
+    {
+      description: 'Pull every link from a note — wikilinks [[X]], embeds ![[X]], markdown [text](url). Unique-deduped wikilinks/embeds; markdown links keep duplicates.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractLinks(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_tables',
+    {
+      description: 'Extract every markdown table from a note. Returns [{startLine, rows: string[][]}]. Skip the separator row.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractTables(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_quotes',
+    {
+      description: 'Pull every blockquote (lines starting with >) from a note. Returns [{startLine, text}].',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractQuotes(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_convert_links',
+    {
+      description: 'Convert link syntax inside a note. mode=wiki-to-md → [[X]] becomes [X](X.md); md-to-wiki → [text](path.md) becomes [[path|text]]. Re-indexes.',
+      inputSchema: { notePath: z.string(), mode: z.enum(['wiki-to-md', 'md-to-wiki']) },
+    },
+    async ({ notePath, mode }) => {
+      try {
+        const r = await fsops.convertLinks(vaultDir, notePath, mode);
+        if (r.replacements > 0) await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_render_toc',
+    {
+      description: "Render a note's outline as a markdown table-of-contents string w/ anchor links.",
+      inputSchema: { notePath: z.string(), maxDepth: z.number().int().positive().max(6).optional() },
+    },
+    async ({ notePath, maxDepth }) => {
+      try { return payload(await fsops.renderToc(vaultDir, notePath, { maxDepth })); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_by_size',
+    {
+      description: 'Find files in a byte-size band. Returns paths sorted largest first.',
+      inputSchema: { minBytes: z.number().int().nonnegative(), maxBytes: z.number().int().positive(), folderPath: z.string().optional() },
+    },
+    async ({ minBytes, maxBytes, folderPath }) => {
+      try { return payload({ files: await fsops.findBySizeRange(vaultDir, minBytes, maxBytes, folderPath ?? '') }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_todos',
+    {
+      description: 'Find TODO / FIXME / NOTE / HACK / XXX markers (configurable) across the vault.',
+      inputSchema: {
+        markers: z.array(z.string().min(1).max(40)).max(20).optional(),
+        pathPrefix: z.string().optional(),
+        limit: z.number().int().positive().max(1000).optional(),
+      },
+    },
+    async ({ markers, pathPrefix, limit }) => {
+      try { return payload({ todos: await fsops.findTodos(vaultDir, { markers, pathPrefix, limit }) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_unreferenced_attachments',
+    { description: 'Attachments (non-md files) that no note references via wikilink/embed/markdown link.' },
+    async () => {
+      try { return payload({ unreferenced: await fsops.findUnreferencedAttachments(vaultDir) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_bulk_frontmatter',
+    {
+      description: 'Fetch frontmatter for N notes in one call. Per-note error surfaced inline; never aborts the batch.',
+      inputSchema: { notePaths: z.array(z.string()).min(1).max(200) },
+    },
+    async ({ notePaths }) => {
+      try { return payload({ results: await fsops.bulkFrontmatter(vaultDir, notePaths) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_index_export',
+    { description: 'Vault-wide link + tag map dump → JSON snapshot for downstream tooling.' },
+    async () => {
+      try { return payload(await fsops.vaultIndexExport(vaultDir, index.linkMap())); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_split_note',
     {
       description: 'Split a note at every level-N heading → one new note per section in a folder. Optionally remove the original (soft-delete).',

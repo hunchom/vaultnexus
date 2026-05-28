@@ -292,6 +292,215 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Extract every link from a note: wikilinks [[X]], markdown [text](url), embeds ![[X]]. */
+export async function extractLinks(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; wikilinks: string[]; markdownLinks: Array<{ text: string; href: string }>; embeds: string[] }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const wiki = [...text.matchAll(/(?<!!)\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)].map((m) => m[1]);
+  const embeds = [...text.matchAll(/!\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)].map((m) => m[1]);
+  const md = [...text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map((m) => ({ text: m[1], href: m[2] }));
+  return { notePath, wikilinks: [...new Set(wiki)], markdownLinks: md, embeds: [...new Set(embeds)] };
+}
+
+/** Extract markdown tables from a note. Returns each table as an array of row arrays. */
+export async function extractTables(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; tables: Array<{ startLine: number; rows: string[][] }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const tables: Array<{ startLine: number; rows: string[][] }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\|.*\|\s*$/.test(lines[i]) && i + 1 < lines.length && /^\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
+      const startLine = i + 1;
+      const rows: string[][] = [];
+      while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) {
+        if (!/^\|?[\s:|-]+\|?\s*$/.test(lines[i])) {
+          rows.push(lines[i].replace(/^\||\|$/g, '').split('|').map((c) => c.trim()));
+        }
+        i += 1;
+      }
+      tables.push({ startLine, rows });
+    } else { i += 1; }
+  }
+  return { notePath, tables };
+}
+
+/** Extract blockquotes (lines starting with >) from a note. Returns grouped quotes. */
+export async function extractQuotes(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; quotes: Array<{ startLine: number; text: string }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const quotes: Array<{ startLine: number; text: string }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\s*>/.test(lines[i])) {
+      const start = i + 1;
+      const buf: string[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) {
+        buf.push(lines[i].replace(/^\s*>\s?/, ''));
+        i += 1;
+      }
+      quotes.push({ startLine: start, text: buf.join('\n') });
+    } else { i += 1; }
+  }
+  return { notePath, quotes };
+}
+
+/** Convert link style inside a note: 'wiki-to-md' → [[X]] → [X](X.md); 'md-to-wiki' → [text](path.md) → [[path|text]]. */
+export async function convertLinks(
+  vaultDir: string, notePath: string, mode: 'wiki-to-md' | 'md-to-wiki',
+): Promise<{ notePath: string; bytes: number; replacements: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  let count = 0;
+  let next: string;
+  if (mode === 'wiki-to-md') {
+    next = raw.replace(/(?<!!)\[\[([^\]|#]+)(\|([^\]]+))?\]\]/g, (_m, target: string, _g2, alias?: string) => {
+      count += 1;
+      const label = alias ?? target;
+      return `[${label}](${target.endsWith('.md') ? target : target + '.md'})`;
+    });
+  } else {
+    next = raw.replace(/\[([^\]]+)\]\(([^)]+\.md)\)/g, (_m, text: string, href: string) => {
+      count += 1;
+      const target = href.replace(/\.md$/i, '');
+      return text === target ? `[[${target}]]` : `[[${target}|${text}]]`;
+    });
+  }
+  if (count > 0) await writeFile(abs, Buffer.from(next, 'utf8'));
+  return { notePath, bytes: Buffer.byteLength(next, 'utf8'), replacements: count };
+}
+
+/** Render a note's outline as a markdown TOC string. */
+export async function renderToc(
+  vaultDir: string, notePath: string, opts: { maxDepth?: number } = {},
+): Promise<{ notePath: string; toc: string; entries: number }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const maxDepth = opts.maxDepth ?? 6;
+  const out: string[] = [];
+  for (const l of lines) {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(l);
+    if (!m) continue;
+    const d = m[1].length;
+    if (d > maxDepth) continue;
+    const slug = m[2].trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+    out.push(`${'  '.repeat(d - 1)}- [${m[2].trim()}](#${slug})`);
+  }
+  return { notePath, toc: out.join('\n'), entries: out.length };
+}
+
+/** Find files within a byte-size range under the vault. */
+export async function findBySizeRange(
+  vaultDir: string, minBytes: number, maxBytes: number, folderPath: string = '',
+): Promise<Array<{ path: string; bytes: number; ext: string }>> {
+  const root = await safeRealpath(vaultDir, safeJoin(vaultDir, folderPath));
+  const out: Array<{ path: string; bytes: number; ext: string }> = [];
+  const walk = async (d: string): Promise<void> => {
+    let entries; try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue;
+      if (e.isSymbolicLink()) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) {
+        const s = await stat(p);
+        if (s.size < minBytes || s.size > maxBytes) continue;
+        out.push({ path: relative(vaultDir, p), bytes: s.size, ext: extname(e.name).toLowerCase().replace(/^\./, '') });
+      }
+    }
+  };
+  await walk(root);
+  out.sort((a, b) => b.bytes - a.bytes);
+  return out;
+}
+
+/** Find TODO / FIXME / NOTE / HACK markers across the vault. */
+export async function findTodos(
+  vaultDir: string, opts: { markers?: string[]; pathPrefix?: string; limit?: number } = {},
+): Promise<Array<{ notePath: string; line: number; marker: string; text: string }>> {
+  const markers = opts.markers ?? ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX'];
+  const re = new RegExp(`\\b(${markers.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'g');
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; line: number; marker: string; text: string }> = [];
+  const cap = opts.limit ?? 200;
+  for (const abs of files) {
+    const rel = relative(vaultDir, abs);
+    if (opts.pathPrefix && !rel.startsWith(opts.pathPrefix)) continue;
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > 1_000_000) continue;
+    const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = re.exec(lines[i]);
+      re.lastIndex = 0;
+      if (m) {
+        out.push({ notePath: rel, line: i + 1, marker: m[1], text: lines[i].slice(0, 200) });
+        if (out.length >= cap) return out;
+      }
+    }
+  }
+  return out;
+}
+
+/** Find attachments referenced from no note. Inverse of listAttachments. */
+export async function findUnreferencedAttachments(
+  vaultDir: string,
+): Promise<Array<{ path: string; bytes: number }>> {
+  const attachments = (await listAttachments(vaultDir)).attachments;
+  if (attachments.length === 0) return [];
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const referenced = new Set<string>();
+  for (const abs of files) {
+    const src = (await readFile(abs)).toString('utf8');
+    for (const a of attachments) {
+      const base = a.path.split('/').pop() ?? '';
+      // Match in [[X]] / ![[X]] / [text](X) — basename or full path.
+      if (src.includes(`[[${base}]]`) || src.includes(`![[${base}]]`) || src.includes(`(${a.path})`) || src.includes(`(${base})`)) {
+        referenced.add(a.path);
+      }
+    }
+  }
+  return attachments
+    .filter((a) => !referenced.has(a.path))
+    .map((a) => ({ path: a.path, bytes: a.bytes }));
+}
+
+/** Bulk frontmatter fetch for N notes in one call → token-efficient batch read. */
+export async function bulkFrontmatter(
+  vaultDir: string, notePaths: string[],
+): Promise<Array<{ notePath: string; frontmatter: Record<string, unknown>; error?: string }>> {
+  const out: Array<{ notePath: string; frontmatter: Record<string, unknown>; error?: string }> = [];
+  for (const np of notePaths) {
+    try { const r = await getFrontmatter(vaultDir, np); out.push({ notePath: np, frontmatter: r.frontmatter }); }
+    catch (e) { out.push({ notePath: np, frontmatter: {}, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Vault-wide link + tag map dump → JSON snapshot for downstream tooling. */
+export async function vaultIndexExport(
+  vaultDir: string, noteLinks: Map<string, string[]>,
+): Promise<{ notes: number; links: Record<string, string[]>; tags: Record<string, string[]> }> {
+  const links: Record<string, string[]> = {};
+  for (const [k, v] of noteLinks) links[k] = v;
+  const tagsByNote: Record<string, string[]> = {};
+  for (const np of noteLinks.keys()) {
+    try {
+      const text = (await readFile(join(vaultDir, np))).toString('utf8');
+      const tags = [...new Set([...text.matchAll(/(?:^|\s)#([A-Za-z0-9][\w/-]*)/gm)].map((m) => m[1]))];
+      if (tags.length > 0) tagsByNote[np] = tags;
+    } catch { /* skip */ }
+  }
+  return { notes: noteLinks.size, links, tags: tagsByNote };
+}
+
 /** Split a note at every level-N heading → N new notes (one per section). Originals optionally kept. */
 export async function splitNote(
   vaultDir: string, notePath: string, opts: { atDepth?: number; outputFolder?: string; keepOriginal?: boolean } = {},
