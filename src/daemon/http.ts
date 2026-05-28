@@ -103,6 +103,11 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_find_empty_notes','vaultnexus_find_notes_without_frontmatter',
         'vaultnexus_find_notes_with_property','vaultnexus_wikilink_audit',
         'vaultnexus_archive_note','vaultnexus_prune_empty_folders','vaultnexus_token_count',
+        // single-key + task + dataview + counts
+        'vaultnexus_set_property','vaultnexus_unset_property',
+        'vaultnexus_add_tag_to_note','vaultnexus_remove_tag',
+        'vaultnexus_find_tasks','vaultnexus_toggle_task',
+        'vaultnexus_find_dataview_blocks','vaultnexus_count_notes','vaultnexus_reindex_note',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience

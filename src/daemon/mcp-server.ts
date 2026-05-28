@@ -551,6 +551,133 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_set_property',
+    {
+      description: 'Set one frontmatter key on a note. Preserves other keys. Inserts the --- block if missing. Re-indexes.',
+      inputSchema: { notePath: z.string(), key: z.string().regex(/^[A-Za-z_][\w-]*$/), value: z.any() },
+    },
+    async ({ notePath, key, value }) => {
+      try {
+        const r = await fsops.setProperty(vaultDir, notePath, key, value);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_unset_property',
+    {
+      description: 'Remove one frontmatter key from a note. No-op if absent. Re-indexes when something changed.',
+      inputSchema: { notePath: z.string(), key: z.string().regex(/^[A-Za-z_][\w-]*$/) },
+    },
+    async ({ notePath, key }) => {
+      try {
+        const r = await fsops.unsetProperty(vaultDir, notePath, key);
+        if (r.removed) await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_add_tag_to_note',
+    {
+      description: 'Append a #tag to one note. Skips if already present. Re-indexes when added.',
+      inputSchema: { notePath: z.string(), tag: z.string().regex(/^[A-Za-z0-9][\w/-]*$/) },
+    },
+    async ({ notePath, tag }) => {
+      try {
+        const r = await fsops.addTagToNote(vaultDir, notePath, tag);
+        if (r.added) await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_remove_tag',
+    {
+      description: 'Strip every occurrence of #tag from one note. Re-indexes on change.',
+      inputSchema: { notePath: z.string(), tag: z.string().regex(/^[A-Za-z0-9][\w/-]*$/) },
+    },
+    async ({ notePath, tag }) => {
+      try {
+        const r = await fsops.removeTagFromNote(vaultDir, notePath, tag);
+        if (r.replacements > 0) await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_tasks',
+    {
+      description: 'Find Obsidian tasks (- [ ] open / - [x] done) across the vault. Filter by status, path prefix; limit cap.',
+      inputSchema: {
+        status: z.enum(['all', 'open', 'done']).optional(),
+        pathPrefix: z.string().optional(),
+        limit: z.number().int().positive().max(1000).optional(),
+      },
+    },
+    async (args) => {
+      try { return payload({ tasks: await fsops.findTasks(vaultDir, args) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_toggle_task',
+    {
+      description: 'Toggle a `- [ ]` ↔ `- [x]` checkbox at a specific 1-indexed line. Re-indexes.',
+      inputSchema: { notePath: z.string(), line: z.number().int().positive() },
+    },
+    async ({ notePath, line }) => {
+      try {
+        const r = await fsops.toggleTask(vaultDir, notePath, line);
+        if (r.newStatus !== 'no-task') await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_dataview_blocks',
+    {
+      description: 'Locate ```dataview ... ``` blocks across vault. Returns notePath + startLine + raw query.',
+      inputSchema: { limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ limit }) => {
+      try { return payload({ blocks: await fsops.findDataviewBlocks(vaultDir, limit ?? 100) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_count_notes',
+    {
+      description: 'Top-level note count + total bytes (optionally filtered by path prefix).',
+      inputSchema: { pathPrefix: z.string().optional() },
+    },
+    async ({ pathPrefix }) => {
+      try { return payload(await fsops.countNotes(vaultDir, pathPrefix)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_reindex_note',
+    {
+      description: 'Force re-chunk + re-embed one note. Use after external edits that fs.watch may have missed.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { await deps.onNoteChanged?.(notePath); return payload({ notePath, reindexed: true }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_note_hash',
     {
       description: 'SHA-256 of a note. Cheap change-detection + dedup key.',

@@ -292,6 +292,146 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Set one frontmatter key. Inserts FM block if missing, preserves other keys. */
+export async function setProperty(
+  vaultDir: string, notePath: string, key: string, value: unknown,
+): Promise<{ notePath: string; bytes: number }> {
+  if (!/^[A-Za-z_][\w-]*$/.test(key)) throw new VaultFsError(`invalid key: ${key}`, 'EBAD');
+  const fm = (await getFrontmatter(vaultDir, notePath)).frontmatter;
+  fm[key] = value;
+  return setFrontmatter(vaultDir, notePath, fm);
+}
+
+/** Remove one frontmatter key. No-op if absent. */
+export async function unsetProperty(
+  vaultDir: string, notePath: string, key: string,
+): Promise<{ notePath: string; bytes: number; removed: boolean }> {
+  const fm = (await getFrontmatter(vaultDir, notePath)).frontmatter;
+  const had = key in fm;
+  if (had) delete fm[key];
+  const r = await setFrontmatter(vaultDir, notePath, fm);
+  return { ...r, removed: had };
+}
+
+/** Add a #tag to one note (skip if exact tag already present). */
+export async function addTagToNote(
+  vaultDir: string, notePath: string, tag: string,
+): Promise<{ notePath: string; added: boolean; bytes: number }> {
+  if (!/^[A-Za-z0-9][\w/-]*$/.test(tag)) throw new VaultFsError(`invalid tag: ${tag}`, 'EBAD');
+  const { text } = await readPage(vaultDir, notePath);
+  const re = new RegExp(`(?:^|\\s)#${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'm');
+  if (re.test(text)) {
+    return { notePath, added: false, bytes: Buffer.byteLength(text, 'utf8') };
+  }
+  const r = await appendToPage(vaultDir, notePath, `\n\n#${tag}\n`);
+  return { notePath, added: true, bytes: r.bytes };
+}
+
+/** Strip every occurrence of #tag (and only that tag, exact) from a note. */
+export async function removeTagFromNote(
+  vaultDir: string, notePath: string, tag: string,
+): Promise<{ notePath: string; replacements: number; bytes: number }> {
+  if (!/^[A-Za-z0-9][\w/-]*$/.test(tag)) throw new VaultFsError(`invalid tag: ${tag}`, 'EBAD');
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const re = new RegExp(`(^|\\s)#${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'gm');
+  let count = 0;
+  const next = raw.replace(re, (_m, ws: string) => { count += 1; return ws; });
+  if (count > 0) await writeFile(abs, Buffer.from(next, 'utf8'));
+  return { notePath, replacements: count, bytes: Buffer.byteLength(next, 'utf8') };
+}
+
+/** Find Obsidian tasks across vault: `- [ ]` (open) + `- [x]` (done), incl. checked variants. */
+export async function findTasks(
+  vaultDir: string, opts: { status?: 'all' | 'open' | 'done'; pathPrefix?: string; limit?: number } = {},
+): Promise<Array<{ notePath: string; line: number; status: 'open' | 'done'; text: string }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const filter = opts.status ?? 'all';
+  const cap = opts.limit ?? 200;
+  const out: Array<{ notePath: string; line: number; status: 'open' | 'done'; text: string }> = [];
+  for (const abs of files) {
+    const rel = relative(vaultDir, abs);
+    if (opts.pathPrefix && !rel.startsWith(opts.pathPrefix)) continue;
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^\s*-\s+\[(.)\]\s+(.+?)\s*$/.exec(lines[i]);
+      if (!m) continue;
+      const status: 'open' | 'done' = m[1].trim().toLowerCase() === 'x' ? 'done' : 'open';
+      if (filter !== 'all' && status !== filter) continue;
+      out.push({ notePath: rel, line: i + 1, status, text: m[2].slice(0, 200) });
+      if (out.length >= cap) return out;
+    }
+  }
+  return out;
+}
+
+/** Toggle a task checkbox at a specific 1-indexed line. */
+export async function toggleTask(
+  vaultDir: string, notePath: string, line: number,
+): Promise<{ notePath: string; line: number; newStatus: 'open' | 'done' | 'no-task'; bytes: number }> {
+  if (line < 1) throw new VaultFsError(`bad line ${line}`, 'EBAD');
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const lines = raw.split(/\r?\n/);
+  if (line > lines.length) throw new VaultFsError(`line ${line} > ${lines.length}`, 'EBAD');
+  const idx = line - 1;
+  const m = /^(\s*-\s+\[)(.)(]\s+.+)$/.exec(lines[idx]);
+  if (!m) return { notePath, line, newStatus: 'no-task', bytes: Buffer.byteLength(raw, 'utf8') };
+  const current = m[2].trim().toLowerCase();
+  const next: 'open' | 'done' = current === 'x' ? 'open' : 'done';
+  lines[idx] = `${m[1]}${next === 'done' ? 'x' : ' '}${m[3]}`;
+  const buf = Buffer.from(lines.join('\n'), 'utf8');
+  await writeFile(abs, buf);
+  return { notePath, line, newStatus: next, bytes: buf.length };
+}
+
+/** Find ```dataview``` blocks across the vault → query + location. */
+export async function findDataviewBlocks(
+  vaultDir: string, limit: number = 100,
+): Promise<Array<{ notePath: string; startLine: number; query: string }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; startLine: number; query: string }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!/^```dataview\s*$/i.test(lines[i])) continue;
+      const start = i + 1;
+      const body: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { body.push(lines[i]); i += 1; }
+      out.push({ notePath: relative(vaultDir, abs), startLine: start, query: body.join('\n') });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+/** Note count snapshot. Cheap top-level read. */
+export async function countNotes(
+  vaultDir: string, pathPrefix?: string,
+): Promise<{ notes: number; bytes: number }> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  let notes = 0; let bytes = 0;
+  for (const abs of files) {
+    if (pathPrefix && !relative(vaultDir, abs).startsWith(pathPrefix)) continue;
+    const s = await stat(abs).catch(() => null);
+    if (!s) continue;
+    notes += 1; bytes += s.size;
+  }
+  return { notes, bytes };
+}
+
 /** SHA-256 hash of a note's bytes → cheap dedup key + change detection. */
 export async function noteHash(
   vaultDir: string, notePath: string,
