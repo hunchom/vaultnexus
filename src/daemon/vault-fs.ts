@@ -309,6 +309,8 @@ export async function bulkSetProperty(
 export async function bulkUnsetProperty(
   vaultDir: string, notePaths: string[], key: string,
 ): Promise<Array<{ notePath: string; removed: boolean; error?: string }>> {
+  // Fast-fail on bad key → don't loop 500× before rejecting (Hardening from latest audit).
+  if (!/^[A-Za-z_][\w-]*$/.test(key)) throw new VaultFsError(`invalid key: ${key}`, 'EBAD');
   const out: Array<{ notePath: string; removed: boolean; error?: string }> = [];
   for (const np of notePaths) {
     try { const r = await unsetProperty(vaultDir, np, key); out.push({ notePath: np, removed: r.removed }); }
@@ -383,6 +385,8 @@ export async function extractInlineFields(
   const lines = text.split(/\r?\n/);
   const fields: Array<{ key: string; value: string; line: number }> = [];
   for (let i = 0; i < lines.length; i += 1) {
+    // Skip pathologically long lines → bounded per-line regex work (mirrors grepVault).
+    if (lines[i].length > 2000) continue;
     for (const m of lines[i].matchAll(/(?:^|[\s\-*])([A-Za-z][\w-]*)::\s*([^\n]+?)(?=\s+[A-Za-z][\w-]*::|$)/g)) {
       fields.push({ key: m[1], value: m[2].trim(), line: i + 1 });
     }
@@ -1553,6 +1557,9 @@ export async function getFrontmatter(
 // Same shape the parser enforces on read → keeps round-trip honest + blocks injection.
 const FM_KEY_RE = /^[A-Za-z_][\w-]*$/;
 
+// Hard cap on the note size that setFrontmatter will accept → bounded bulk-write blast radius.
+const SET_FM_MAX_FILE_BYTES = 10_000_000;
+
 /** Write frontmatter back. Replaces existing --- block or prepends a new one. */
 export async function setFrontmatter(
   vaultDir: string, notePath: string, frontmatter: Record<string, unknown>,
@@ -1562,6 +1569,12 @@ export async function setFrontmatter(
     if (!FM_KEY_RE.test(k)) throw new VaultFsError(`invalid frontmatter key: ${JSON.stringify(k)}`, 'EBAD');
   }
   const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  // Size guard → bulk callers can't OOM the daemon w/ 500 × giant-note write (Fix: review MEDIUM bulk-FM).
+  const sz = await stat(abs).catch(() => null);
+  if (!sz) throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND');
+  if (sz.size > SET_FM_MAX_FILE_BYTES) {
+    throw new VaultFsError(`note > ${SET_FM_MAX_FILE_BYTES}b: ${notePath}`, 'EBAD');
+  }
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
