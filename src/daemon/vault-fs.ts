@@ -292,6 +292,124 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Bulk set one frontmatter key on N notes. Per-note error inline; never aborts. */
+export async function bulkSetProperty(
+  vaultDir: string, notePaths: string[], key: string, value: unknown,
+): Promise<Array<{ notePath: string; ok: boolean; error?: string }>> {
+  if (!/^[A-Za-z_][\w-]*$/.test(key)) throw new VaultFsError(`invalid key: ${key}`, 'EBAD');
+  const out: Array<{ notePath: string; ok: boolean; error?: string }> = [];
+  for (const np of notePaths) {
+    try { await setProperty(vaultDir, np, key, value); out.push({ notePath: np, ok: true }); }
+    catch (e) { out.push({ notePath: np, ok: false, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Bulk unset one frontmatter key on N notes. */
+export async function bulkUnsetProperty(
+  vaultDir: string, notePaths: string[], key: string,
+): Promise<Array<{ notePath: string; removed: boolean; error?: string }>> {
+  const out: Array<{ notePath: string; removed: boolean; error?: string }> = [];
+  for (const np of notePaths) {
+    try { const r = await unsetProperty(vaultDir, np, key); out.push({ notePath: np, removed: r.removed }); }
+    catch (e) { out.push({ notePath: np, removed: false, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Bulk copy: duplicate N notes by {from, to} pairs. */
+export async function bulkCopy(
+  vaultDir: string, pairs: Array<{ from: string; to: string }>,
+): Promise<Array<{ from: string; to: string; ok: boolean; error?: string }>> {
+  const out: Array<{ from: string; to: string; ok: boolean; error?: string }> = [];
+  for (const pair of pairs) {
+    try { await copyPage(vaultDir, pair.from, pair.to); out.push({ ...pair, ok: true }); }
+    catch (e) { out.push({ ...pair, ok: false, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Bulk soft-delete: trash N notes in one call. */
+export async function bulkDelete(
+  vaultDir: string, notePaths: string[],
+): Promise<Array<{ notePath: string; ok: boolean; trashedAt?: string; error?: string }>> {
+  const out: Array<{ notePath: string; ok: boolean; trashedAt?: string; error?: string }> = [];
+  for (const np of notePaths) {
+    try { const r = await deletePage(vaultDir, np); out.push({ notePath: np, ok: true, trashedAt: r.trashedAt }); }
+    catch (e) { out.push({ notePath: np, ok: false, error: (e as Error).message }); }
+  }
+  return out;
+}
+
+/** Vault-wide top words (lowercased, stopword-filtered). */
+const STOPWORDS = new Set('the and for are but not you all any can had her was one our out day get has him his how man new now old see two way who boy did its let put say she too use that with from this they have were said been than them like into your time some more very what just take know come well may say will can man'.split(/\s+/));
+export async function vaultTopTerms(
+  vaultDir: string, limit: number = 50,
+): Promise<Array<{ term: string; count: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const counts = new Map<string, number>();
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const text = (await readFile(abs)).toString('utf8').toLowerCase();
+    for (const m of text.matchAll(/[a-z]{4,}/g)) {
+      if (STOPWORDS.has(m[0])) continue;
+      counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([term, count]) => ({ term, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+/** First non-empty paragraph of a note (skips frontmatter + heading). */
+export async function extractFirstParagraph(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; paragraph: string }> {
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 64_000 });
+  const body = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  const blocks = body.split(/\n\n+/);
+  const para = blocks.find((b) => b.trim() && !/^#{1,6}\s+/.test(b.trim())) ?? '';
+  return { notePath, paragraph: para.trim() };
+}
+
+/** Dataview-style inline fields: `key:: value` on a single line. */
+export async function extractInlineFields(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; fields: Array<{ key: string; value: string; line: number }> }> {
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 500_000 });
+  const lines = text.split(/\r?\n/);
+  const fields: Array<{ key: string; value: string; line: number }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(/(?:^|[\s\-*])([A-Za-z][\w-]*)::\s*([^\n]+?)(?=\s+[A-Za-z][\w-]*::|$)/g)) {
+      fields.push({ key: m[1], value: m[2].trim(), line: i + 1 });
+    }
+  }
+  return { notePath, fields };
+}
+
+/** Notes that reference at least one attachment. */
+export async function findNotesWithAttachments(
+  vaultDir: string,
+): Promise<Array<{ notePath: string; attachmentCount: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; attachmentCount: number }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+    const text = (await readFile(abs)).toString('utf8');
+    const embeds = [...text.matchAll(/!\[\[[^\]|#]+\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|mp3|mp4|mov|webm)/gi)].length;
+    const mdImgs = [...text.matchAll(/!\[[^\]]*\]\([^)]+\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|mp3|mp4|mov|webm)\)/gi)].length;
+    const total = embeds + mdImgs;
+    if (total > 0) out.push({ notePath: relative(vaultDir, abs), attachmentCount: total });
+  }
+  out.sort((a, b) => b.attachmentCount - a.attachmentCount);
+  return out;
+}
+
 /** Notes modified between two unix-ms timestamps. */
 export async function notesInDateRange(
   vaultDir: string, fromMs: number, toMs: number, limit: number = 100,

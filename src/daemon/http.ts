@@ -114,6 +114,11 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_replace_first_line','vaultnexus_word_density',
         'vaultnexus_find_circular_links','vaultnexus_frontmatter_distribution',
         'vaultnexus_note_status','vaultnexus_today',
+        // bulk ops + topics + inline + first para + attachments
+        'vaultnexus_bulk_set_property','vaultnexus_bulk_unset_property',
+        'vaultnexus_bulk_copy','vaultnexus_bulk_delete',
+        'vaultnexus_vault_top_terms','vaultnexus_first_paragraph',
+        'vaultnexus_extract_inline_fields','vaultnexus_find_notes_with_attachments',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience

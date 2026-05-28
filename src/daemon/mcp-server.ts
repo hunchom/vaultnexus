@@ -551,6 +551,111 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_bulk_set_property',
+    {
+      description: 'Set one FM key on N notes in one call. Per-note error inline; never aborts the batch. Re-indexes successes.',
+      inputSchema: { notePaths: z.array(z.string()).min(1).max(500), key: z.string().regex(/^[A-Za-z_][\w-]*$/), value: z.any() },
+    },
+    async ({ notePaths, key, value }) => {
+      try {
+        const r = await fsops.bulkSetProperty(vaultDir, notePaths, key, value);
+        for (const item of r) if (item.ok) await deps.onNoteChanged?.(item.notePath);
+        return payload({ results: r });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_bulk_unset_property',
+    {
+      description: 'Remove one FM key on N notes. Per-note error inline.',
+      inputSchema: { notePaths: z.array(z.string()).min(1).max(500), key: z.string().regex(/^[A-Za-z_][\w-]*$/) },
+    },
+    async ({ notePaths, key }) => {
+      try {
+        const r = await fsops.bulkUnsetProperty(vaultDir, notePaths, key);
+        for (const item of r) if (item.removed) await deps.onNoteChanged?.(item.notePath);
+        return payload({ results: r });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_bulk_copy',
+    {
+      description: 'Copy N notes in one call. {from, to}[]. Per-pair error inline.',
+      inputSchema: { pairs: z.array(z.object({ from: z.string(), to: z.string() })).min(1).max(200) },
+    },
+    async ({ pairs }) => {
+      try {
+        const r = await fsops.bulkCopy(vaultDir, pairs);
+        for (const item of r) if (item.ok) await deps.onNoteChanged?.(item.to);
+        return payload({ results: r });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_bulk_delete',
+    {
+      description: 'Soft-delete N notes in one call. Per-note error inline; never aborts.',
+      inputSchema: { notePaths: z.array(z.string()).min(1).max(500) },
+    },
+    async ({ notePaths }) => {
+      try {
+        const r = await fsops.bulkDelete(vaultDir, notePaths);
+        for (const item of r) if (item.ok) await deps.onNoteRemoved?.(item.notePath);
+        return payload({ results: r });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_vault_top_terms',
+    {
+      description: 'Most common ≥4-letter words across the vault (stopword-filtered, lowercased). Useful for tag/topic discovery.',
+      inputSchema: { limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ limit }) => {
+      try { return payload({ terms: await fsops.vaultTopTerms(vaultDir, limit ?? 50) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_first_paragraph',
+    {
+      description: 'First non-empty paragraph of a note (skips frontmatter + heading). Token-efficient teaser.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractFirstParagraph(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_inline_fields',
+    {
+      description: 'Dataview-style inline fields key:: value. Returns [{key, value, line}].',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractInlineFields(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_notes_with_attachments',
+    { description: 'Notes that reference one or more attachments (image/pdf/video). Sorted by attachment count desc.' },
+    async () => {
+      try { return payload({ notes: await fsops.findNotesWithAttachments(vaultDir) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_notes_in_date_range',
     {
       description: 'Notes modified between two unix-ms timestamps. Newest first; limit cap default 100.',
