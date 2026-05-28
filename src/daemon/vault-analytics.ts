@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { walkMarkdown } from './indexer.js';
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
-const TAG_RE = /(?:^|\s)#([A-Za-z0-9][\w/-]*)/g;
+// m flag → ^ matches every line start, not just string start (Fix: review finding #4).
+const TAG_RE = /(?:^|\s)#([A-Za-z0-9][\w/-]*)/gm;
 const WIKILINK_RE = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g;
 
 export interface OutlineNode { depth: number; text: string; byteOffset: number; }
@@ -12,13 +13,15 @@ export interface OutlineNode { depth: number; text: string; byteOffset: number; 
 /** Parse heading lines into a flat outline (depth + text + byte offset of `#` char). */
 export function outlineFromSource(source: string): OutlineNode[] {
   const out: OutlineNode[] = [];
+  // Detect line-ending width once → byte offsets stay accurate on CRLF (Fix: review finding #5).
+  const lineEndingWidth = source.includes('\r\n') ? 2 : 1;
   const lines = source.split(/\r?\n/);
   let bytePos = 0;
   for (const line of lines) {
     const lineByteLen = Buffer.byteLength(line, 'utf8');
     const m = HEADING_RE.exec(line);
     if (m) out.push({ depth: m[1].length, text: m[2].trim(), byteOffset: bytePos });
-    bytePos += lineByteLen + 1; // +1 for the LF (CRLF would shift by 2 but rare in vaults)
+    bytePos += lineByteLen + lineEndingWidth;
   }
   return out;
 }

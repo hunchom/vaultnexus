@@ -140,17 +140,17 @@ export class VaultIndex {
 
   /** Chunk a note, embed its blocks, store unit-norm for search. Persists to snapshot if attached + meta given. */
   async addNote(notePath: string, source: string, meta?: { contentSha: string; mtimeMs: number }): Promise<void> {
+    // Register link map first → notePaths()/linkMap() see empty notes too (Fix: review finding #1).
+    this.noteLinks.set(notePath, extractWikilinks(source));
     // tokenBudget:0 → one block per paragraph (paragraph = retrieval unit)
     const blocks = chunkDocument(source, { tokenBudget: 0 }).filter((c) => c.granularity === 'block');
     if (blocks.length === 0) {
-      // still register meta + empty chunk set → snapshot stays in sync (no chunks to persist)
       if (this.snapshot && meta) {
         this.snapshot.setNote(notePath, meta.contentSha, meta.mtimeMs);
         this.snapshot.putChunks(notePath, []);
       }
       return;
     }
-    this.noteLinks.set(notePath, extractWikilinks(source));
     const vecs = await this.embedder.embed(blocks.map((b) => b.text));
     const unitVecs = vecs.map((v) => l2normalize(v));
     const snapChunks: SnapshotChunk[] = [];

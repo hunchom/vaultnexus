@@ -216,14 +216,17 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
       description: 'Vault metrics: notes, chunks, total bytes, avg chunk bytes, embedder + chat model id.',
     },
     async () => {
+      // stat() instead of readFile() → no file content load just to sum sizes (Fix: review finding #6).
       const notes = index.notePaths();
       let bytes = 0;
       let chunkBytes = 0;
       const chunks = index.size;
+      const { stat } = await import('node:fs/promises');
+      const { join: pjoin } = await import('node:path');
       for (const n of notes) {
         try {
-          const r = await fsops.readPage(vaultDir, n);
-          bytes += r.bytes;
+          const s = await stat(pjoin(vaultDir, n));
+          bytes += s.size;
         } catch { /* skip notes that vanished mid-walk */ }
       }
       for (const c of notes.flatMap((n) => index.chunksOfNote(n))) chunkBytes += Buffer.byteLength(c.text, 'utf8');
@@ -379,15 +382,30 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   server.registerTool(
     'vaultnexus_move',
     {
-      description: 'Rename / move a note or folder within the vault. Re-indexes (drops old path, adds new).',
+      description: 'Rename / move a note or folder within the vault. Re-indexes (drops old paths, adds new).',
       inputSchema: { from: z.string(), to: z.string() },
     },
     async ({ from, to }) => {
       try {
+        // Collect notes-under-folder BEFORE the rename so the index can mirror the move (Fix: review finding #3).
+        const isFolderSrc = !from.toLowerCase().endsWith('.md');
+        const prefix = from.replace(/\/+$/, '') + '/';
+        const notesUnder = isFolderSrc
+          ? index.notePaths().filter((n) => n.startsWith(prefix))
+          : [];
         const r = await fsops.renamePath(vaultDir, from, to);
-        await deps.onNoteRemoved?.(from);
-        if (to.toLowerCase().endsWith('.md')) await deps.onNoteChanged?.(to);
-        return payload(r);
+        if (isFolderSrc) {
+          const toPrefix = to.replace(/\/+$/, '') + '/';
+          for (const oldPath of notesUnder) {
+            const newPath = toPrefix + oldPath.slice(prefix.length);
+            await deps.onNoteRemoved?.(oldPath);
+            await deps.onNoteChanged?.(newPath);
+          }
+        } else {
+          await deps.onNoteRemoved?.(from);
+          if (to.toLowerCase().endsWith('.md')) await deps.onNoteChanged?.(to);
+        }
+        return payload({ ...r, droppedFromIndex: isFolderSrc ? notesUnder.length : 1 });
       } catch (e) { return errPayload((e as Error).message); }
     },
   );
@@ -455,7 +473,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   server.registerTool(
     'vaultnexus_get_partial',
     {
-      description: 'Slice of a note by selector: heading section, frontmatter, or outline. kind=heading|frontmatter|outline.',
+      description: 'Slice of a note by selector. kind=heading requires text. kind=frontmatter|outline ignores text.',
       inputSchema: {
         notePath: z.string(),
         kind: z.enum(['heading', 'frontmatter', 'outline']),
@@ -463,8 +481,10 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
       },
     },
     async ({ notePath, kind, text }) => {
+      // Heading mode w/o text would silently match no heading → bail early (Fix: review finding #9).
+      if (kind === 'heading' && (!text || !text.trim())) return errPayload('text required when kind=heading');
       try {
-        const sel = kind === 'heading' ? { kind: 'heading' as const, text: text ?? '' }
+        const sel = kind === 'heading' ? { kind: 'heading' as const, text: text! }
           : kind === 'frontmatter' ? { kind: 'frontmatter' as const }
           : { kind: 'outline' as const };
         return payload(await fsops.getPartial(vaultDir, notePath, sel));
@@ -531,19 +551,129 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_list_bookmarks',
+    {
+      description: 'Read .obsidian/bookmarks.json → flat list of bookmarked notes + headings. Empty when no bookmarks file.',
+    },
+    async () => {
+      try {
+        const { readFile } = await import('node:fs/promises');
+        const { join: pjoin } = await import('node:path');
+        const raw = await readFile(pjoin(vaultDir, '.obsidian', 'bookmarks.json'), 'utf8');
+        const data = JSON.parse(raw) as { items?: Array<{ type?: string; path?: string; subpath?: string; title?: string }> };
+        const flat: Array<{ type: string; path: string; subpath: string; title: string }> = [];
+        const walk = (items: Array<{ type?: string; path?: string; subpath?: string; title?: string; items?: unknown[] }>): void => {
+          for (const it of items) {
+            if (it.type === 'group' && Array.isArray((it as { items?: unknown[] }).items)) {
+              walk((it as { items: Array<{ type?: string; path?: string; subpath?: string; title?: string }> }).items);
+            } else if (it.path) {
+              flat.push({ type: it.type ?? '?', path: it.path, subpath: it.subpath ?? '', title: it.title ?? '' });
+            }
+          }
+        };
+        walk(data.items ?? []);
+        return payload({ bookmarks: flat });
+      } catch (e) {
+        // Missing bookmarks file → empty list, not error.
+        if ((e as { code?: string }).code === 'ENOENT') return payload({ bookmarks: [] });
+        return errPayload((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_execute_template',
+    {
+      description: 'Apply a Templater-style template (.md file in vault) → new note. Substitutes {{date}}, {{time}}, {{title}}, and any user-supplied variables.',
+      inputSchema: {
+        templatePath: z.string(),
+        targetPath: z.string(),
+        title: z.string().optional(),
+        variables: z.record(z.string(), z.string()).optional(),
+      },
+    },
+    async ({ templatePath, targetPath, title, variables }) => {
+      try {
+        const { text: tmpl } = await fsops.readPage(vaultDir, templatePath);
+        const now = new Date();
+        const yyyy = now.getUTCFullYear();
+        const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(now.getUTCDate()).padStart(2, '0');
+        const hh = String(now.getUTCHours()).padStart(2, '0');
+        const min = String(now.getUTCMinutes()).padStart(2, '0');
+        const built: Record<string, string> = {
+          date: `${yyyy}-${mm}-${dd}`,
+          time: `${hh}:${min}`,
+          title: title ?? targetPath.replace(/\.md$/i, '').split('/').pop() ?? '',
+          ...(variables ?? {}),
+        };
+        // Replace {{var}} literally; no eval, no JS execution. Simple Templater compat surface.
+        const filled = tmpl.replace(/\{\{\s*([a-zA-Z_][\w-]*)\s*\}\}/g, (m, k: string) =>
+          built[k] !== undefined ? built[k] : m,
+        );
+        const r = await fsops.createPage(vaultDir, targetPath, filled);
+        await deps.onNoteChanged?.(targetPath);
+        return payload({ ...r, templatePath, substitutions: Object.keys(built).length });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_fetch_url',
     {
-      description: 'HTTP GET a URL → trimmed markdown. Useful for inline web research that ends up in a note.',
-      inputSchema: { url: z.string().regex(/^https?:\/\//), maxBytes: z.number().int().positive().optional() },
+      description: 'HTTP GET a URL → response text. Blocks private/localhost/cloud-metadata IPs on every hop (no SSRF). Streams body w/ a hard byte cap (default 200KB).',
+      inputSchema: { url: z.string().regex(/^https?:\/\//), maxBytes: z.number().int().positive().max(5_000_000).optional() },
     },
     async ({ url, maxBytes }) => {
       try {
-        const r = await fetch(url, { headers: { 'user-agent': 'vaultnexus/0.1' } });
+        // Block private + loopback + link-local + cloud-metadata literals upfront.
+        const isPrivateUrl = (u: string): boolean => {
+          try {
+            const host = new URL(u).hostname.toLowerCase();
+            if (host === 'localhost' || host === '0.0.0.0' || host === '::' || host === '::1') return true;
+            if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return true;
+            if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
+            if (host === 'metadata.google.internal' || host === 'metadata' || host === '169.254.169.254') return true;
+            if (host.startsWith('fc') || host.startsWith('fd')) return true; // fc00::/7
+            return false;
+          } catch { return true; }
+        };
+        if (isPrivateUrl(url)) return errPayload('blocked: private/loopback/metadata target');
+        // Manual redirects → re-check each hop.
+        let current = url;
+        let r: Response | undefined;
+        for (let i = 0; i < 5; i += 1) {
+          r = await fetch(current, { headers: { 'user-agent': 'vaultnexus/0.1' }, redirect: 'manual' });
+          const loc = r.headers.get('location');
+          if (r.status >= 300 && r.status < 400 && loc) {
+            const next = new URL(loc, current).toString();
+            if (isPrivateUrl(next)) return errPayload(`blocked: redirect to private target ${new URL(next).hostname}`);
+            current = next;
+            continue;
+          }
+          break;
+        }
+        if (!r) return errPayload('no response');
         if (!r.ok) return errPayload(`HTTP ${r.status}`);
-        const buf = await r.text();
+        // Streaming byte cap → never buffer more than `cap` bytes regardless of Content-Length.
         const cap = maxBytes ?? 200_000;
-        const text = buf.length > cap ? buf.slice(0, cap) + '\n\n... (truncated)' : buf;
-        return payload({ url, status: r.status, contentType: r.headers.get('content-type') ?? '', bytes: buf.length, text });
+        const reader = r.body?.getReader();
+        if (!reader) return errPayload('no body');
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        let truncated = false;
+        while (total < cap) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          total += value.length;
+        }
+        if (total >= cap) { truncated = true; await reader.cancel().catch(() => undefined); }
+        const buf = new Uint8Array(total);
+        let off = 0; for (const c of chunks) { buf.set(c.subarray(0, Math.min(c.length, cap - off)), off); off += c.length; if (off >= cap) break; }
+        let text = new TextDecoder('utf-8').decode(buf.subarray(0, Math.min(total, cap)));
+        if (truncated) text += '\n\n... (truncated)';
+        return payload({ url: current, status: r.status, contentType: r.headers.get('content-type') ?? '', returnedBytes: Math.min(total, cap), truncated, text });
       } catch (e) { return errPayload((e as Error).message); }
     },
   );

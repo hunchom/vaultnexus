@@ -1,6 +1,6 @@
 // Filesystem ops scoped to a vault root. Every public fn re-resolves the input
 // under vaultDir + asserts no escape → no path traversal via .. or absolute paths.
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, dirname, extname, sep } from 'node:path';
 
 export class VaultFsError extends Error {
@@ -12,6 +12,8 @@ export class VaultFsError extends Error {
 
 function safeJoin(vaultDir: string, p: string): string {
   if (typeof p !== 'string') throw new VaultFsError('path required', 'EBAD');
+  // Reject NUL bytes outright → some OS calls truncate at NUL → tricky traversal.
+  if (p.includes('\0')) throw new VaultFsError(`path contains NUL`, 'EBAD');
   const norm = p.replace(/^\/+/, '');                 // strip leading / → vault-relative
   const abs = resolve(vaultDir, norm);
   const rel = relative(vaultDir, abs);
@@ -19,6 +21,24 @@ function safeJoin(vaultDir: string, p: string): string {
     throw new VaultFsError(`path escapes vault: ${p}`, 'EESCAPE');
   }
   return abs;
+}
+
+// Resolve any symlinks at the final path. If the realpath escapes the vault → reject.
+// Called on every read/write/delete after safeJoin → defense vs symlink-into-/etc/passwd.
+async function safeRealpath(vaultDir: string, abs: string): Promise<string> {
+  try {
+    const real = await realpath(abs);
+    const realVault = await realpath(vaultDir).catch(() => vaultDir);
+    const rel = relative(realVault, real);
+    if (rel.startsWith('..') || rel === '..' || rel.split(sep).includes('..')) {
+      throw new VaultFsError(`symlink escapes vault: ${abs}`, 'EESCAPE');
+    }
+    return real;
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ENOENT') return abs; // doesn't exist yet (createPage)
+    if ((e as VaultFsError).code === 'EESCAPE') throw e;
+    return abs; // realpath failure on a still-resolvable parent → fall through (write tools handle ENOENT)
+  }
 }
 
 export interface DirEntry { name: string; path: string; kind: 'note' | 'folder' | 'other'; }
@@ -30,7 +50,7 @@ export interface VaultListing {
 
 /** List contents of a folder (relative to vault root). Skips dotfiles/dotdirs. */
 export async function listFolder(vaultDir: string, p: string = ''): Promise<VaultListing> {
-  const abs = safeJoin(vaultDir, p);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, p));
   let entries;
   try { entries = await readdir(abs, { withFileTypes: true }); }
   catch (e) { throw new VaultFsError(`folder not found: ${p}`, 'ENOTFOUND'); }
@@ -51,7 +71,7 @@ export async function readPage(
   notePath: string,
   opts: { byteStart?: number; byteEnd?: number } = {},
 ): Promise<{ notePath: string; bytes: number; text: string }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let buf;
   try { buf = await readFile(abs); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -68,7 +88,7 @@ export async function createPage(
   if (!notePath.toLowerCase().endsWith('.md')) {
     throw new VaultFsError('notePath must end with .md', 'EBAD');
   }
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   if (!opts.overwrite) {
     try { await stat(abs); throw new VaultFsError(`note exists: ${notePath}`, 'EEXISTS'); }
     catch (e) { if ((e as VaultFsError).code === 'EEXISTS') throw e; /* otherwise ENOENT → ok */ }
@@ -81,7 +101,7 @@ export async function createPage(
 
 /** mkdir -p under vault. */
 export async function createFolder(vaultDir: string, folderPath: string): Promise<{ folderPath: string }> {
-  const abs = safeJoin(vaultDir, folderPath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, folderPath));
   await mkdir(abs, { recursive: true });
   return { folderPath };
 }
@@ -90,7 +110,7 @@ export async function createFolder(vaultDir: string, folderPath: string): Promis
 export async function appendToPage(
   vaultDir: string, notePath: string, text: string,
 ): Promise<{ notePath: string; bytes: number; appended: number }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let cur;
   try { cur = await readFile(abs); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -104,7 +124,7 @@ export async function appendToPage(
 export async function insertAfterHeading(
   vaultDir: string, notePath: string, headingText: string, insertion: string,
 ): Promise<{ notePath: string; bytes: number; insertedAtByte: number }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -121,14 +141,15 @@ export async function insertAfterHeading(
   const next = pre + '\n\n' + insertion.trimEnd() + '\n' + (post.length ? '\n' + post : '');
   const buf = Buffer.from(next, 'utf8');
   await writeFile(abs, buf);
-  return { notePath, bytes: buf.length, insertedAtByte: Buffer.byteLength(pre, 'utf8') + 1 };
+  // After pre + '\n\n' the inserted content starts at byteLen(pre)+2 (Fix: review finding #2).
+  return { notePath, bytes: buf.length, insertedAtByte: Buffer.byteLength(pre, 'utf8') + 2 };
 }
 
 /** Replace first or all occurrences of literal `find` with `replace`. */
 export async function replaceInPage(
   vaultDir: string, notePath: string, find: string, replace: string, opts: { all?: boolean } = {},
 ): Promise<{ notePath: string; replacements: number; bytes: number }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -152,7 +173,7 @@ export async function replaceInPage(
 export async function deletePage(
   vaultDir: string, notePath: string,
 ): Promise<{ notePath: string; trashedAt: string }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   try { await stat(abs); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -166,7 +187,7 @@ export async function deletePage(
 export async function deleteFolder(
   vaultDir: string, folderPath: string, opts: { force?: boolean } = {},
 ): Promise<{ folderPath: string; trashedAt: string }> {
-  const abs = safeJoin(vaultDir, folderPath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, folderPath));
   let entries;
   try { entries = await readdir(abs); }
   catch { throw new VaultFsError(`folder not found: ${folderPath}`, 'ENOTFOUND'); }
@@ -184,8 +205,8 @@ export async function deleteFolder(
 export async function renamePath(
   vaultDir: string, from: string, to: string,
 ): Promise<{ from: string; to: string }> {
-  const absFrom = safeJoin(vaultDir, from);
-  const absTo = safeJoin(vaultDir, to);
+  const absFrom = await safeRealpath(vaultDir, safeJoin(vaultDir, from));
+  const absTo = await safeRealpath(vaultDir, safeJoin(vaultDir, to));
   try { await stat(absFrom); }
   catch { throw new VaultFsError(`source not found: ${from}`, 'ENOTFOUND'); }
   try { await stat(absTo); throw new VaultFsError(`destination exists: ${to}`, 'EEXISTS'); }
@@ -201,7 +222,7 @@ export async function getPartial(
   notePath: string,
   selector: { kind: 'heading'; text: string } | { kind: 'frontmatter' } | { kind: 'outline' },
 ): Promise<{ notePath: string; kind: string; text: string }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -242,7 +263,7 @@ export async function getPartial(
 export async function patchHeadingSection(
   vaultDir: string, notePath: string, headingText: string, newBody: string,
 ): Promise<{ notePath: string; bytes: number; replacedLines: number }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -275,7 +296,7 @@ export async function patchHeadingSection(
 export async function renameHeading(
   vaultDir: string, notePath: string, oldText: string, newText: string,
 ): Promise<{ notePath: string; replacements: number; bytes: number }> {
-  const abs = safeJoin(vaultDir, notePath);
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
@@ -295,8 +316,8 @@ export async function renameHeading(
 export async function copyPage(
   vaultDir: string, from: string, to: string, opts: { overwrite?: boolean } = {},
 ): Promise<{ from: string; to: string; bytes: number }> {
-  const absFrom = safeJoin(vaultDir, from);
-  const absTo = safeJoin(vaultDir, to);
+  const absFrom = await safeRealpath(vaultDir, safeJoin(vaultDir, from));
+  const absTo = await safeRealpath(vaultDir, safeJoin(vaultDir, to));
   let buf;
   try { buf = await readFile(absFrom); }
   catch { throw new VaultFsError(`source not found: ${from}`, 'ENOTFOUND'); }

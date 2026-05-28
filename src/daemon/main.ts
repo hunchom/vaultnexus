@@ -95,27 +95,44 @@ async function main(): Promise<void> {
     recentSelfWrites.set(notePath, Date.now() + 1500);
   };
 
+  // Per-path serialization → concurrent reindex requests queue, not interleave (Fix: review finding #8).
+  const reindexLocks = new Map<string, Promise<void>>();
+  const serialize = async (notePath: string, fn: () => Promise<void>): Promise<void> => {
+    const prior = reindexLocks.get(notePath) ?? Promise.resolve();
+    const next = prior.then(fn, fn);
+    reindexLocks.set(notePath, next.catch(() => undefined));
+    await next;
+  };
+
   // Re-index a single note → called by MCP write tools + fs.watch.
   const reindexNote = async (notePath: string): Promise<void> => {
     if (!vaultDir) return;
+    // Defense-in-depth: reject paths that escape the vault even though all known callers pre-validate.
+    const { relative: prel, resolve: pres, isAbsolute } = await import('node:path');
+    const rel = prel(vaultDir, pres(vaultDir, notePath));
+    if (isAbsolute(notePath) || rel.startsWith('..')) return;
     suppressNextWatch(notePath);
-    try {
-      const { createHash } = await import('node:crypto');
-      const { readFile, stat } = await import('node:fs/promises');
-      const { join: pjoin } = await import('node:path');
-      const abs = pjoin(vaultDir, notePath);
-      const buf = await readFile(abs);
-      const st = await stat(abs);
-      const contentSha = createHash('sha256').update(buf).digest('hex');
-      await index.removeNote(notePath); // drop stale chunks; addNote re-fills snapshot too
-      await index.addNote(notePath, buf.toString('utf8'), { contentSha, mtimeMs: st.mtimeMs });
-    } catch (e) {
-      process.stderr.write(`vaultnexus: reindex failed for ${notePath}: ${String(e)}\n`);
-    }
+    await serialize(notePath, async () => {
+      try {
+        const { createHash } = await import('node:crypto');
+        const { readFile, stat } = await import('node:fs/promises');
+        const { join: pjoin } = await import('node:path');
+        const abs = pjoin(vaultDir, notePath);
+        const buf = await readFile(abs);
+        const st = await stat(abs);
+        const contentSha = createHash('sha256').update(buf).digest('hex');
+        await index.removeNote(notePath);
+        await index.addNote(notePath, buf.toString('utf8'), { contentSha, mtimeMs: st.mtimeMs });
+      } catch (e) {
+        process.stderr.write(`vaultnexus: reindex failed for ${notePath}: ${String(e)}\n`);
+      }
+    });
   };
   const removeNote = async (notePath: string): Promise<void> => {
     suppressNextWatch(notePath);
-    try { await index.removeNote(notePath); } catch { /* ignore */ }
+    await serialize(notePath, async () => {
+      try { await index.removeNote(notePath); } catch { /* ignore */ }
+    });
   };
 
   const mcpDeps = {

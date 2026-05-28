@@ -7,6 +7,11 @@ import type { VaultIndex } from './vault-index.js';
 
 export interface HttpAppDeps { index?: VaultIndex; embedderId?: string; }
 
+// Origin allowlist: Electron renderer for the Obsidian plugin + null (curl / non-browser).
+// Other browser pages get a 403 from the manual middleware below — a stolen Origin header
+// can't be forged by JS, so this stops the drive-by exfil class of attack.
+const ORIGIN_ALLOWLIST = new Set<string>(['app://obsidian.md']);
+
 // Body schemas mirror MCP tool surface → keep client surfaces aligned.
 const searchBody = z.object({
   query: z.string().min(1),
@@ -27,9 +32,21 @@ const configureChatBody = z.object({
 /** Loopback HTTP surface for the Obsidian plugin. /health always; /search + /bridges when index injected. */
 export function createHttpApp(deps: HttpAppDeps = {}): Hono {
   const app = new Hono();
-  // Obsidian renderer (Electron app://) + browser clients on localhost issue cross-origin → allow all.
-  // Loopback-only bind keeps the surface single-host; CORS just unblocks the browser-side preflight.
-  app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['content-type'] }));
+  // Origin gate: refuse browser-originated requests unless the Origin is the Electron renderer.
+  // Non-browser clients (curl, Claude Desktop's stdio bridge, etc.) don't send Origin → allow.
+  app.use('*', async (c, next) => {
+    const origin = c.req.header('origin');
+    if (origin && !ORIGIN_ALLOWLIST.has(origin)) {
+      return c.json({ error: 'forbidden origin' }, 403);
+    }
+    await next();
+  });
+  // CORS scoped to the Electron origin only → no more drive-by exfil from arbitrary tabs.
+  app.use('*', cors({
+    origin: (incoming): string | null => ORIGIN_ALLOWLIST.has(incoming) ? incoming : null,
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['content-type'],
+  }));
   app.get('/health', (c) => c.json(health()));
 
   // GET /status → richer diagnostic (index size, chat-model id) for the plugin settings tab.
@@ -61,6 +78,8 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_find_by_tag','vaultnexus_broken_links',
         'vaultnexus_get_partial','vaultnexus_patch_section',
         'vaultnexus_daily_note','vaultnexus_periodic_note','vaultnexus_fetch_url',
+        // obsidian-adjacent
+        'vaultnexus_list_bookmarks','vaultnexus_execute_template',
       ],
     });
   });
