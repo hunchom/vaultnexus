@@ -319,10 +319,17 @@ export async function getFrontmatter(
   return { notePath, frontmatter: fm, bodyByteOffset: Buffer.byteLength(m[0], 'utf8') };
 }
 
+// Same shape the parser enforces on read → keeps round-trip honest + blocks injection.
+const FM_KEY_RE = /^[A-Za-z_][\w-]*$/;
+
 /** Write frontmatter back. Replaces existing --- block or prepends a new one. */
 export async function setFrontmatter(
   vaultDir: string, notePath: string, frontmatter: Record<string, unknown>,
 ): Promise<{ notePath: string; bytes: number }> {
+  // Reject structural-char injection in keys (Fix: review finding #3).
+  for (const k of Object.keys(frontmatter)) {
+    if (!FM_KEY_RE.test(k)) throw new VaultFsError(`invalid frontmatter key: ${JSON.stringify(k)}`, 'EBAD');
+  }
   const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
   try { raw = (await readFile(abs)).toString('utf8'); }
@@ -354,11 +361,15 @@ export async function listAttachments(
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
       const p = join(d, e.name);
-      if (e.isDirectory()) await walk(p);
+      // Per-child realpath check → symlink escapes the vault (Fix: review finding #2).
+      let real;
+      try { real = await safeRealpath(vaultDir, p); }
+      catch (err) { if ((err as VaultFsError).code === 'EESCAPE') continue; throw err; }
+      if (e.isDirectory()) await walk(real);
       else if (e.isFile()) {
         const ext = extname(e.name).toLowerCase();
         if (ext === '.md') continue;
-        const s = await stat(p);
+        const s = await stat(real);
         out.push({ path: relative(vaultDir, p), bytes: s.size, ext });
       }
     }
@@ -368,32 +379,55 @@ export async function listAttachments(
   return { folderPath, attachments: out };
 }
 
+// Hard caps → bound worst-case ReDoS + memory blowup (Fix: review finding #1).
+const GREP_MAX_PATTERN_LEN = 256;
+const GREP_MAX_FILE_BYTES = 1_000_000;
+const GREP_MAX_LINE_LEN = 5000;
+
+// Detect obviously catastrophic backtracking shapes. Conservative; rejects only the worst.
+function isLikelyCatastrophic(pat: string): boolean {
+  // Nested unbounded quantifiers: (X+)+, (X*)*, (X+)*, (X*)+, (.+)+ etc.
+  return /(\([^)]*[+*][^)]*\)[+*])/.test(pat);
+}
+
 /** Plain-text grep across the vault. Optional regex. Returns line hits w/ pre/post context. */
 export async function grepVault(
   vaultDir: string,
   pattern: string,
   opts: { regex?: boolean; ignoreCase?: boolean; context?: number; pathPrefix?: string; maxHits?: number } = {},
 ): Promise<{ pattern: string; hits: Array<{ notePath: string; line: number; text: string; before: string[]; after: string[] }> }> {
+  if (pattern.length > GREP_MAX_PATTERN_LEN) {
+    throw new VaultFsError(`pattern too long (>${GREP_MAX_PATTERN_LEN} chars)`, 'EBAD');
+  }
+  if (opts.regex && isLikelyCatastrophic(pattern)) {
+    throw new VaultFsError('pattern rejected: nested unbounded quantifier (ReDoS shape)', 'EBAD');
+  }
   const ctx = Math.max(0, Math.min(opts.context ?? 0, 5));
   const cap = opts.maxHits ?? 200;
   const flags = `g${opts.ignoreCase ? 'i' : ''}`;
-  const re = opts.regex
-    ? new RegExp(pattern, flags)
-    : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  let re: RegExp;
+  try {
+    re = opts.regex
+      ? new RegExp(pattern, flags)
+      : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  } catch (e) { throw new VaultFsError(`bad pattern: ${(e as Error).message}`, 'EBAD'); }
   const { walkMarkdown } = await import('./indexer.js');
   const files = await walkMarkdown(vaultDir);
   const hits: Array<{ notePath: string; line: number; text: string; before: string[]; after: string[] }> = [];
   for (const abs of files) {
     const rel = relative(vaultDir, abs);
     if (opts.pathPrefix && !rel.startsWith(opts.pathPrefix)) continue;
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > GREP_MAX_FILE_BYTES) continue; // skip huge files → bounded memory.
     const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i += 1) {
-      if (!re.test(lines[i])) continue;
+      const ln = lines[i].length > GREP_MAX_LINE_LEN ? lines[i].slice(0, GREP_MAX_LINE_LEN) : lines[i];
+      if (!re.test(ln)) continue;
       re.lastIndex = 0;
       hits.push({
         notePath: rel,
         line: i + 1,
-        text: lines[i],
+        text: ln,
         before: lines.slice(Math.max(0, i - ctx), i),
         after: lines.slice(i + 1, i + 1 + ctx),
       });
@@ -426,6 +460,7 @@ export async function appendToPeriodic(
   opts: { date?: string; folder?: string; template?: string } = {},
 ): Promise<{ notePath: string; bytes: number; appended: number; created: boolean }> {
   const d = opts.date ? new Date(opts.date) : new Date();
+  if (Number.isNaN(d.getTime())) throw new VaultFsError(`bad date: ${opts.date}`, 'EBAD');
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
@@ -453,11 +488,13 @@ export async function appendToPeriodic(
 }
 
 /** Diff two notes (line-based unified). Caps at 200 lines either side → token-efficient. */
+const DIFF_MAX_BYTES_PER_SIDE = 2_000_000;
 export async function diffNotes(
   vaultDir: string, a: string, b: string,
 ): Promise<{ a: string; b: string; same: boolean; addedLines: number; removedLines: number; diff: string }> {
-  const ra = (await readPage(vaultDir, a)).text;
-  const rb = (await readPage(vaultDir, b)).text;
+  // Byte-cap each side → avoid OOM on a giant note (Fix: review finding #4).
+  const ra = (await readPage(vaultDir, a, { byteStart: 0, byteEnd: DIFF_MAX_BYTES_PER_SIDE })).text;
+  const rb = (await readPage(vaultDir, b, { byteStart: 0, byteEnd: DIFF_MAX_BYTES_PER_SIDE })).text;
   if (ra === rb) return { a, b, same: true, addedLines: 0, removedLines: 0, diff: '' };
   const la = ra.split(/\r?\n/);
   const lb = rb.split(/\r?\n/);
