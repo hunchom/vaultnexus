@@ -363,7 +363,9 @@ export async function convertLinks(
     next = raw.replace(/(?<!!)\[\[([^\]|#]+)(\|([^\]]+))?\]\]/g, (_m, target: string, _g2, alias?: string) => {
       count += 1;
       const label = alias ?? target;
-      return `[${label}](${target.endsWith('.md') ? target : target + '.md'})`;
+      // Strip traversal segments + leading slashes from the href → no clickable escape (Fix: review MEDIUM #1).
+      const cleanTarget = target.replace(/\.{2,}/g, '').replace(/^\/+/, '');
+      return `[${label}](${cleanTarget.endsWith('.md') ? cleanTarget : cleanTarget + '.md'})`;
     });
   } else {
     next = raw.replace(/\[([^\]]+)\]\(([^)]+\.md)\)/g, (_m, text: string, href: string) => {
@@ -458,6 +460,9 @@ export async function findUnreferencedAttachments(
   const files = await walkMarkdown(vaultDir);
   const referenced = new Set<string>();
   for (const abs of files) {
+    // Skip giant files → bounded heap on the inner O(N×M) scan (Fix: review MEDIUM #2).
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
     const src = (await readFile(abs)).toString('utf8');
     for (const a of attachments) {
       const base = a.path.split('/').pop() ?? '';
@@ -493,7 +498,11 @@ export async function vaultIndexExport(
   const tagsByNote: Record<string, string[]> = {};
   for (const np of noteLinks.keys()) {
     try {
-      const text = (await readFile(join(vaultDir, np))).toString('utf8');
+      // safeJoin defense-in-depth + per-file cap (Fix: review MEDIUM #4).
+      const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, np));
+      const s = await stat(abs).catch(() => null);
+      if (!s || s.size > MAX_ANALYTICS_READ_BYTES) continue;
+      const text = (await readFile(abs)).toString('utf8');
       const tags = [...new Set([...text.matchAll(/(?:^|\s)#([A-Za-z0-9][\w/-]*)/gm)].map((m) => m[1]))];
       if (tags.length > 0) tagsByNote[np] = tags;
     } catch { /* skip */ }
@@ -903,13 +912,18 @@ export async function exportBundle(
   return { bundle, bytes: Buffer.byteLength(bundle, 'utf8'), included: parts.length, truncated };
 }
 
+// Per-file read cap shared by analytics tools → bounded heap on giant notes (Fix: review MEDIUM #2,#3,#4).
+const MAX_ANALYTICS_READ_BYTES = 1_000_000;
+const FRONTMATTER_PROBE_BYTES = 16_384;
+
 /** Parse frontmatter (between leading --- fences). Returns parsed object + body bytes start. */
 export async function getFrontmatter(
   vaultDir: string, notePath: string,
 ): Promise<{ notePath: string; frontmatter: Record<string, unknown>; bodyByteOffset: number }> {
   const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
   let raw;
-  try { raw = (await readFile(abs)).toString('utf8'); }
+  // 16KB cap — frontmatter is always at top of file → never reach this in practice (Fix: review MEDIUM #3).
+  try { raw = (await readFile(abs)).subarray(0, FRONTMATTER_PROBE_BYTES).toString('utf8'); }
   catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
   const m = /^---\n([\s\S]*?)\n---(\n|$)/.exec(raw);
   if (!m) return { notePath, frontmatter: {}, bodyByteOffset: 0 };
