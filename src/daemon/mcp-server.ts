@@ -606,8 +606,11 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
 
   server.registerTool(
     'vaultnexus_wikilink_audit',
-    { description: 'Vault-wide wikilink resolution audit. Returns counts + unresolved [{from, target}] + per-target reference counts.' },
-    async () => payload(await fsops.wikilinkAudit(index.linkMap())),
+    {
+      description: 'Vault-wide wikilink resolution audit. Returns counts + unresolved [{from, target}] (capped) + per-target reference counts. truncated=true when the unresolved cap fires.',
+      inputSchema: { limit: z.number().int().positive().max(50_000).optional() },
+    },
+    async ({ limit }) => payload(await fsops.wikilinkAudit(index.linkMap(), limit ?? 5000)),
   );
 
   server.registerTool(

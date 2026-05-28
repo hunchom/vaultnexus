@@ -346,20 +346,26 @@ export async function findEmptyNotes(
   return out;
 }
 
-/** Notes that lack any frontmatter block. */
+/** Notes that lack any frontmatter block. Probes the first 64 bytes only (Fix: review MEDIUM #3). */
 export async function findNotesWithoutFrontmatter(
   vaultDir: string,
 ): Promise<Array<{ notePath: string; bytes: number }>> {
   const { walkMarkdown } = await import('./indexer.js');
+  const { open } = await import('node:fs/promises');
   const files = await walkMarkdown(vaultDir);
   const out: Array<{ notePath: string; bytes: number }> = [];
   for (const abs of files) {
-    const buf = await readFile(abs).catch(() => null);
-    if (!buf) continue;
-    const head = buf.subarray(0, 64).toString('utf8');
-    if (!/^---\n/.test(head)) {
-      out.push({ notePath: relative(vaultDir, abs), bytes: buf.length });
-    }
+    const s = await stat(abs).catch(() => null);
+    if (!s) continue;
+    let fh;
+    try { fh = await open(abs, 'r'); }
+    catch { continue; }
+    const buf = Buffer.alloc(64);
+    try {
+      await fh.read(buf, 0, 64, 0);
+      const head = buf.toString('utf8');
+      if (!/^---\n/.test(head)) out.push({ notePath: relative(vaultDir, abs), bytes: s.size });
+    } finally { await fh.close(); }
   }
   return out.sort((a, b) => a.notePath.localeCompare(b.notePath));
 }
@@ -381,26 +387,28 @@ export async function findNotesWithProperty(
   return out.sort((a, b) => a.notePath.localeCompare(b.notePath));
 }
 
-/** Wikilink audit: every wikilink target across vault + resolved? */
+/** Wikilink audit: every wikilink target across vault + resolved? Bounded response (Fix: review MEDIUM #4). */
 export async function wikilinkAudit(
-  noteLinks: Map<string, string[]>,
-): Promise<{ resolved: number; unresolved: Array<{ from: string; target: string }>; counts: Record<string, number> }> {
+  noteLinks: Map<string, string[]>, limit: number = 5000,
+): Promise<{ resolved: number; unresolved: Array<{ from: string; target: string }>; counts: Record<string, number>; truncated: boolean }> {
   const allNotes = [...noteLinks.keys()];
   const baseNames = new Set(allNotes.map((p) => p.replace(/\.md$/i, '').split('/').pop()?.toLowerCase() ?? ''));
   const fullPaths = new Set(allNotes.map((p) => p.toLowerCase()));
   const counts: Record<string, number> = {};
   const unresolved: Array<{ from: string; target: string }> = [];
   let resolved = 0;
+  let truncated = false;
   for (const [from, targets] of noteLinks) {
     for (const t of targets) {
       counts[t] = (counts[t] ?? 0) + 1;
       const tLower = t.toLowerCase();
       const ok = baseNames.has(tLower) || fullPaths.has(tLower) || fullPaths.has(`${tLower}.md`);
       if (ok) resolved += 1;
-      else unresolved.push({ from, target: t });
+      else if (unresolved.length < limit) unresolved.push({ from, target: t });
+      else truncated = true;
     }
   }
-  return { resolved, unresolved, counts };
+  return { resolved, unresolved, counts, truncated };
 }
 
 /** Archive a note: move to an archive folder + add an archived: <date> frontmatter key. */
@@ -434,6 +442,10 @@ export async function pruneEmptyFolders(
     let nonEmpty = false;
     for (const e of kids) {
       const p = join(d, e.name);
+      // Per-child safeRealpath → symlink-to-dir outside vault never recurses, never gets rmdir'd (Fix: review MEDIUM #1).
+      if (e.isSymbolicLink()) { nonEmpty = true; continue; }
+      try { await safeRealpath(vaultDir, p); }
+      catch (err) { if ((err as VaultFsError).code === 'EESCAPE') { nonEmpty = true; continue; } throw err; }
       if (e.isDirectory()) {
         const empty = !(await walk(p));
         if (!empty) nonEmpty = true;
@@ -452,13 +464,15 @@ export async function pruneEmptyFolders(
   return { pruned: pruned.sort() };
 }
 
-/** GPT-tokenizer token count (BPE) for a note. */
+/** GPT-tokenizer token count (BPE) for a note. Caps at 500KB → never blocks the event loop (Fix: review MEDIUM #2). */
 export async function tokenCount(
   vaultDir: string, notePath: string,
-): Promise<{ notePath: string; tokens: number; bytes: number }> {
-  const { text, bytes } = await readPage(vaultDir, notePath);
+): Promise<{ notePath: string; tokens: number; bytes: number; truncated: boolean }> {
+  const { bytes } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 1 });
+  const cap = 500_000;
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: cap });
   const { encode } = await import('gpt-tokenizer');
-  return { notePath, tokens: encode(text).length, bytes };
+  return { notePath, tokens: encode(text).length, bytes, truncated: bytes > cap };
 }
 
 /** Extract every link from a note: wikilinks [[X]], markdown [text](url), embeds ![[X]]. */
