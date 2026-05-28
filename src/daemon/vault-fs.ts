@@ -332,12 +332,17 @@ export async function extractCode(
 export async function restoreTrashed(
   vaultDir: string, originalPath: string,
 ): Promise<{ notePath: string; from: string }> {
+  if (originalPath.includes('\0')) throw new VaultFsError('path contains NUL', 'EBAD');
   const trashRoot = await safeRealpath(vaultDir, safeJoin(vaultDir, '.trash'));
   let stamps;
   try { stamps = await readdir(trashRoot); } catch { throw new VaultFsError('no .trash', 'ENOTFOUND'); }
   stamps.sort().reverse();
   for (const ts of stamps) {
-    const candidate = join(trashRoot, ts, originalPath);
+    const stampDir = join(trashRoot, ts);
+    const candidate = resolve(stampDir, originalPath);
+    // Containment: candidate must stay inside <trashRoot>/<ts>/ (Fix: review HIGH #1).
+    const rel = relative(stampDir, candidate);
+    if (rel.startsWith('..') || rel === '..' || rel.split(sep).includes('..')) continue;
     try { await stat(candidate); }
     catch { continue; }
     const dest = await safeRealpath(vaultDir, safeJoin(vaultDir, originalPath));
@@ -357,16 +362,21 @@ export async function cleanupTrash(
   try { stamps = await readdir(trashRoot); } catch { return { removedEntries: 0, freedBytes: 0 }; }
   let entries = 0;
   let freed = 0;
+  // Per-child realpath check → symlinks pointing outside the vault are skipped, not followed.
   const sumDir = async (d: string): Promise<void> => {
     for (const e of await readdir(d, { withFileTypes: true })) {
       const p = join(d, e.name);
+      try { await safeRealpath(vaultDir, p); }
+      catch (err) { if ((err as VaultFsError).code === 'EESCAPE') continue; throw err; }
       if (e.isDirectory()) await sumDir(p);
       else { entries += 1; freed += (await stat(p)).size; }
     }
   };
   for (const ts of stamps) {
-    try { await sumDir(join(trashRoot, ts)); } catch { /* skip */ }
-    await rm(join(trashRoot, ts), { recursive: true, force: true });
+    const stampDir = join(trashRoot, ts);
+    try { await sumDir(stampDir); } catch { /* skip */ }
+    // rm w/ recursive but on a path we proved is inside the vault.
+    await rm(stampDir, { recursive: true, force: true });
   }
   return { removedEntries: entries, freedBytes: freed };
 }
@@ -381,12 +391,15 @@ export async function replaceWikilinkTarget(
   // Match the target inside [[...]] only, preserving any |alias or #anchor suffix.
   const re = new RegExp(`\\[\\[${oldEsc}(?=[\\]|#])`, 'g');
   const reExact = new RegExp(`\\[\\[${oldEsc}\\]\\]`, 'g');
+  // Replacer fns → newTarget literals (no $&, $1, etc. expansion) — Fix: review hardening #2.
+  const repPartial = (): string => `[[${newTarget}`;
+  const repExact = (): string => `[[${newTarget}]]`;
   const touched: Array<{ notePath: string; replacements: number }> = [];
   for (const abs of files) {
     const rel = relative(vaultDir, abs);
     const raw = (await readFile(abs)).toString('utf8');
-    let next = raw.replace(re, `[[${newTarget}`);
-    next = next.replace(reExact, `[[${newTarget}]]`);
+    let next = raw.replace(re, repPartial);
+    next = next.replace(reExact, repExact);
     if (next !== raw) {
       const count = (raw.match(re)?.length ?? 0) + (raw.match(reExact)?.length ?? 0);
       await writeFile(abs, Buffer.from(next, 'utf8'));
@@ -396,20 +409,30 @@ export async function replaceWikilinkTarget(
   return { touched };
 }
 
-/** Export multiple notes as one concatenated markdown bundle. */
+// Bundle caps → bounded memory + bounded MCP payload (Fix: review MEDIUM #2).
+const BUNDLE_MAX_BYTES_PER_NOTE = 500_000;
+const BUNDLE_MAX_TOTAL_BYTES = 10_000_000;
+
+/** Export multiple notes as one concatenated markdown bundle. Per-note + total byte cap. */
 export async function exportBundle(
   vaultDir: string, notePaths: string[], opts: { separator?: string } = {},
-): Promise<{ bundle: string; bytes: number; included: number }> {
+): Promise<{ bundle: string; bytes: number; included: number; truncated: boolean }> {
   const sep = opts.separator ?? '\n\n---\n\n';
   const parts: string[] = [];
+  let total = 0;
+  let truncated = false;
   for (const np of notePaths) {
     try {
-      const { text } = await readPage(vaultDir, np);
-      parts.push(`# ${np}\n\n${text}`);
+      const { text } = await readPage(vaultDir, np, { byteStart: 0, byteEnd: BUNDLE_MAX_BYTES_PER_NOTE });
+      const part = `# ${np}\n\n${text}`;
+      const partBytes = Buffer.byteLength(part, 'utf8');
+      if (total + partBytes > BUNDLE_MAX_TOTAL_BYTES) { truncated = true; break; }
+      parts.push(part);
+      total += partBytes + Buffer.byteLength(sep, 'utf8');
     } catch { /* skip missing */ }
   }
   const bundle = parts.join(sep);
-  return { bundle, bytes: Buffer.byteLength(bundle, 'utf8'), included: parts.length };
+  return { bundle, bytes: Buffer.byteLength(bundle, 'utf8'), included: parts.length, truncated };
 }
 
 /** Parse frontmatter (between leading --- fences). Returns parsed object + body bytes start. */
