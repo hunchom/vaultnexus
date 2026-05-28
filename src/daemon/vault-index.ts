@@ -91,6 +91,53 @@ export class VaultIndex {
     return this.chunks.length;
   }
 
+  /** Snapshot of note paths currently in the index. */
+  notePaths(): string[] {
+    return [...this.noteLinks.keys()].sort();
+  }
+
+  /** Outbound wikilink targets cached for a note. Empty if note unknown. */
+  outboundLinks(notePath: string): string[] {
+    return [...(this.noteLinks.get(notePath) ?? [])];
+  }
+
+  /** Read-only access to the full link map (for analytics tools). */
+  linkMap(): Map<string, string[]> {
+    return new Map([...this.noteLinks.entries()].map(([k, v]) => [k, [...v]]));
+  }
+
+  /** All chunks belonging to a note → cheap outline + neighbors. */
+  chunksOfNote(notePath: string): IndexedChunk[] {
+    return this.chunks.filter((c) => c.notePath === notePath);
+  }
+
+  /** Embed once + rank against the rest of the vault → semantic neighbors of a whole note. */
+  async neighborsOf(notePath: string, k = 10): Promise<SearchHit[]> {
+    const own = this.chunks.filter((c) => c.notePath === notePath);
+    if (own.length === 0) return [];
+    // Use the longest own chunk as the seed → most signal w/ a single embed call.
+    const seed = own.reduce((a, b) => (a.text.length >= b.text.length ? a : b)).text;
+    const hits = await this.query(seed, k * 2);
+    return hits.filter((h) => h.notePath !== notePath).slice(0, k);
+  }
+
+  /** Drop a note from the index. Rebuilds the int8 + FTS stores so query() stays correct. */
+  async removeNote(notePath: string): Promise<void> {
+    // Collect kept indices first → filter chunks + f32 in lockstep.
+    const keep: number[] = [];
+    for (let i = 0; i < this.chunks.length; i += 1) {
+      if (this.chunks[i].notePath !== notePath) keep.push(i);
+    }
+    this.chunks = keep.map((i) => this.chunks[i]);
+    this.f32 = keep.map((i) => this.f32[i]);
+    this.noteLinks.delete(notePath);
+    // FTS rowids were the old indices → easiest: clear + re-add at new compact ids.
+    this.fts.clear();
+    this.chunks.forEach((c, id) => this.fts.add(id, c.text));
+    this.flatInt8 = null;
+    if (this.snapshot) this.snapshot.deleteNote(notePath);
+  }
+
   /** Chunk a note, embed its blocks, store unit-norm for search. Persists to snapshot if attached + meta given. */
   async addNote(notePath: string, source: string, meta?: { contentSha: string; mtimeMs: number }): Promise<void> {
     // tokenBudget:0 → one block per paragraph (paragraph = retrieval unit)

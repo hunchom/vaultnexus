@@ -41,9 +41,21 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
       embedder: deps.embedderId ?? 'fake',
       chatModel: idx ? idx.chatModelId() : 'none',
       tools: [
-        'vaultnexus_ping','vaultnexus_search','vaultnexus_bridges',
-        'vaultnexus_trace','vaultnexus_reason','vaultnexus_history',
-        'vaultnexus_recall_history','vaultnexus_forecasts',
+        // retrieval
+        'vaultnexus_ping','vaultnexus_search','vaultnexus_bridges','vaultnexus_neighbors',
+        // reasoning
+        'vaultnexus_trace','vaultnexus_reason',
+        // history + forecasts
+        'vaultnexus_history','vaultnexus_recall_history','vaultnexus_forecasts',
+        // read
+        'vaultnexus_list','vaultnexus_read_page','vaultnexus_outline',
+        'vaultnexus_stats','vaultnexus_tags','vaultnexus_recent',
+        'vaultnexus_orphans','vaultnexus_link_graph',
+        // write
+        'vaultnexus_create_page','vaultnexus_create_folder',
+        'vaultnexus_append_to_page','vaultnexus_insert_after_heading','vaultnexus_replace_in_page',
+        'vaultnexus_delete_page','vaultnexus_delete_folder',
+        'vaultnexus_move','vaultnexus_copy_page',
       ],
     });
   });

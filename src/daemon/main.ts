@@ -88,14 +88,77 @@ async function main(): Promise<void> {
     }
   }
 
+  // Re-index a single note → called by MCP write tools + fs.watch.
+  const reindexNote = async (notePath: string): Promise<void> => {
+    if (!vaultDir) return;
+    try {
+      const { createHash } = await import('node:crypto');
+      const { readFile, stat } = await import('node:fs/promises');
+      const { join: pjoin } = await import('node:path');
+      const abs = pjoin(vaultDir, notePath);
+      const buf = await readFile(abs);
+      const st = await stat(abs);
+      const contentSha = createHash('sha256').update(buf).digest('hex');
+      await index.removeNote(notePath); // drop stale chunks; addNote re-fills snapshot too
+      await index.addNote(notePath, buf.toString('utf8'), { contentSha, mtimeMs: st.mtimeMs });
+    } catch (e) {
+      process.stderr.write(`vaultnexus: reindex failed for ${notePath}: ${String(e)}\n`);
+    }
+  };
+  const removeNote = async (notePath: string): Promise<void> => {
+    try { await index.removeNote(notePath); } catch { /* ignore */ }
+  };
+
+  const mcpDeps = {
+    index: vaultDir ? index : undefined,
+    vaultDir,
+    embedderId: embedder.id ?? 'fake',
+    onNoteChanged: reindexNote,
+    onNoteRemoved: removeNote,
+  } as const;
+
   const socketServer = createServer((socket: Socket) => {
     const transport = new SocketServerTransport(socket);
-    const mcp = createMcpServer({ index: vaultDir ? index : undefined });
+    const mcp = createMcpServer(mcpDeps);
     mcp.connect(transport).catch((e) =>
       process.stderr.write(`vaultnexus: connection failed ${String(e)}\n`),
     );
   });
   await new Promise<void>((resolve) => socketServer.listen(socketPath, resolve));
+
+  // fs.watch: external writes (Obsidian saving a note) → debounced reindex.
+  // Bursty writes coalesce → one reindex per 250ms quiet window per path.
+  if (vaultDir) {
+    const { watch } = await import('node:fs');
+    const { relative: prel } = await import('node:path');
+    const debounce = new Map<string, NodeJS.Timeout>();
+    try {
+      watch(vaultDir, { recursive: true }, (eventType, filename) => {
+        if (!filename) return;
+        if (filename.startsWith('.')) return;
+        if (filename.includes('/.')) return; // skip .obsidian/, .trash/, etc.
+        if (!filename.toLowerCase().endsWith('.md')) return;
+        const notePath = prel(vaultDir, prel(vaultDir, filename) === filename ? filename : filename);
+        const key = notePath;
+        const prev = debounce.get(key);
+        if (prev) clearTimeout(prev);
+        debounce.set(key, setTimeout(async () => {
+          debounce.delete(key);
+          try {
+            const { stat } = await import('node:fs/promises');
+            const { join: pjoin2 } = await import('node:path');
+            await stat(pjoin2(vaultDir, key));
+            await reindexNote(key);
+          } catch {
+            // file vanished → drop from index
+            await removeNote(key);
+          }
+        }, 250));
+      });
+    } catch (e) {
+      process.stderr.write(`vaultnexus: fs.watch unavailable (${String(e)}) — live reindex disabled\n`);
+    }
+  }
 
   // Await actual bind → race-free readiness signal for integration tests
   let httpReady: () => void;
@@ -103,6 +166,7 @@ async function main(): Promise<void> {
   const http: ServerType = serve(
     {
       fetch: createHttpApp({ index: vaultDir ? index : undefined, embedderId: embedder.id ?? 'fake' }).fetch,
+      // Reuse the same MCP server factory for any future HTTP-MCP transport; for now HTTP is just REST.
       hostname: '127.0.0.1',
       port: httpPort,
     },

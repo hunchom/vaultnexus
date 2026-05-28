@@ -18,7 +18,10 @@ describe('createMcpServer', () => {
 
     const result = await client.callTool({ name: 'vaultnexus_ping', arguments: {} });
     const text = (result.content as Array<{ type: string; text: string }>)[0].text;
-    expect(JSON.parse(text)).toEqual(health());
+    const got = JSON.parse(text);
+    // ping returns health() plus an embedder id field; both must be present.
+    expect(got).toMatchObject(health());
+    expect(typeof got.embedder).toBe('string');
 
     await client.close();
   });

@@ -45,7 +45,9 @@ describe('end-to-end: Claude Code -> bridge -> daemon', () => {
 
     const result = await client.callTool({ name: 'vaultnexus_ping', arguments: {} });
     const text = (result.content as Array<{ type: string; text: string }>)[0].text;
-    expect(JSON.parse(text)).toEqual(health());
+    const got = JSON.parse(text);
+    expect(got).toMatchObject(health());
+    expect(typeof got.embedder).toBe('string');
 
     await client.close();
   });

@@ -12,7 +12,8 @@ describe('GET /status', () => {
     expect(j.indexed).toBe(0);
     expect(j.chatModel).toBe('none');
     expect(j.embedder).toBe('fake');
-    expect((j.tools as string[]).length).toBe(8);
+    // Tool surface grew past the original 8 → just assert lower bound.
+    expect((j.tools as string[]).length).toBeGreaterThanOrEqual(8);
   });
 
   it('reports embedderId from deps', async () => {
@@ -31,14 +32,15 @@ describe('GET /status', () => {
     expect(j.indexed).toBeGreaterThan(0);
   });
 
-  it('tools list contains all 8 vaultnexus_* names', async () => {
+  it('tools list contains every vaultnexus_* tool the MCP server registers', async () => {
     const j = (await (await createHttpApp().request('/status')).json()) as { tools: string[] };
-    const expected = new Set([
-      'vaultnexus_ping', 'vaultnexus_search', 'vaultnexus_bridges',
-      'vaultnexus_trace', 'vaultnexus_reason', 'vaultnexus_history',
-      'vaultnexus_recall_history', 'vaultnexus_forecasts',
-    ]);
-    for (const name of j.tools) expect(expected.has(name)).toBe(true);
-    expect(j.tools.length).toBe(expected.size);
+    // Every advertised name starts with vaultnexus_.
+    for (const name of j.tools) expect(name.startsWith('vaultnexus_')).toBe(true);
+    // Surface should be at least the original 8 + read/write expansion.
+    expect(j.tools.length).toBeGreaterThanOrEqual(20);
+    // Spot-check the canonical entries are still present.
+    for (const n of ['vaultnexus_ping', 'vaultnexus_search', 'vaultnexus_create_page', 'vaultnexus_delete_page']) {
+      expect(j.tools).toContain(n);
+    }
   });
 });

@@ -24,6 +24,16 @@ export class FtsIndex {
     return terms.map((t) => `"${t}"`).join(' OR ');
   }
 
+  /** Drop a row by id → keeps in-memory FTS consistent w/ chunk array rebuilds. */
+  remove(id: number): void {
+    this.db.prepare('DELETE FROM chunks WHERE rowid = ?').run(id);
+  }
+
+  /** Wipe the whole table (used when VaultIndex rebuilds after a multi-note removal). */
+  clear(): void {
+    this.db.exec('DELETE FROM chunks');
+  }
+
   /** bm25-ranked hits; higher score = better (negated from SQLite bm25 lower=better). */
   search(query: string, k: number): FtsHit[] {
     const match = this.toMatch(query);
