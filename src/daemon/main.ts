@@ -88,9 +88,17 @@ async function main(): Promise<void> {
     }
   }
 
+  // Recent self-writes suppress the next fs.watch reindex for that path → prevents
+  // double reindex churn from a tool write + the subsequent inotify event.
+  const recentSelfWrites = new Map<string, number>();
+  const suppressNextWatch = (notePath: string): void => {
+    recentSelfWrites.set(notePath, Date.now() + 1500);
+  };
+
   // Re-index a single note → called by MCP write tools + fs.watch.
   const reindexNote = async (notePath: string): Promise<void> => {
     if (!vaultDir) return;
+    suppressNextWatch(notePath);
     try {
       const { createHash } = await import('node:crypto');
       const { readFile, stat } = await import('node:fs/promises');
@@ -106,6 +114,7 @@ async function main(): Promise<void> {
     }
   };
   const removeNote = async (notePath: string): Promise<void> => {
+    suppressNextWatch(notePath);
     try { await index.removeNote(notePath); } catch { /* ignore */ }
   };
 
@@ -144,6 +153,12 @@ async function main(): Promise<void> {
         if (prev) clearTimeout(prev);
         debounce.set(key, setTimeout(async () => {
           debounce.delete(key);
+          // Skip if we just did this write ourselves through a tool handler.
+          const expiry = recentSelfWrites.get(key);
+          if (expiry && expiry > Date.now()) {
+            recentSelfWrites.delete(key);
+            return;
+          }
           try {
             const { stat } = await import('node:fs/promises');
             const { join: pjoin2 } = await import('node:path');
