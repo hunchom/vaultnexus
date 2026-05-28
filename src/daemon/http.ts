@@ -80,6 +80,11 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_daily_note','vaultnexus_periodic_note','vaultnexus_fetch_url',
         // grep + analytics
         'vaultnexus_grep','vaultnexus_word_count','vaultnexus_list_attachments','vaultnexus_diff_notes',
+        'vaultnexus_note_meta','vaultnexus_extract_code','vaultnexus_search_in_note','vaultnexus_vault_doctor',
+        // write extras
+        'vaultnexus_prepend_to_page','vaultnexus_replace_wikilink_target','vaultnexus_tag_notes',
+        // trash + bundle
+        'vaultnexus_restore_trashed','vaultnexus_cleanup_trash','vaultnexus_export_bundle',
         // frontmatter
         'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
         // periodic convenience

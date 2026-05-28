@@ -551,6 +551,174 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_prepend_to_page',
+    {
+      description: 'Prepend text to the top of a note (above existing content). Re-indexes.',
+      inputSchema: { notePath: z.string(), text: z.string() },
+    },
+    async ({ notePath, text }) => {
+      try {
+        const r = await fsops.prependToPage(vaultDir, notePath, text);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_extract_code',
+    {
+      description: 'Extract every fenced ``` codeblock from a note. Returns [{lang, code, startLine}].',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.extractCode(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_note_meta',
+    {
+      description: 'One-call snapshot: frontmatter + headings + tags-in-note + word count + inbound/outbound links. Token-efficient combined read.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try {
+        const [fm, wc, page] = await Promise.all([
+          fsops.getFrontmatter(vaultDir, notePath).catch(() => ({ frontmatter: {} })),
+          fsops.wordCount(vaultDir, notePath),
+          fsops.readPage(vaultDir, notePath),
+        ]);
+        const headings = outlineFromSource(page.text);
+        const tags = [...new Set([...page.text.matchAll(/(?:^|\s)#([A-Za-z0-9][\w/-]*)/gm)].map((m) => m[1]))];
+        const links = linkGraph(index.linkMap(), notePath);
+        return payload({
+          notePath,
+          frontmatter: (fm as { frontmatter: unknown }).frontmatter,
+          words: wc.words, chars: wc.chars, lines: wc.lines, bytes: wc.bytes,
+          headings, tags, inboundLinks: links.inbound, outboundLinks: links.outbound,
+        });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_replace_wikilink_target',
+    {
+      description: 'Rename every [[oldTarget]] / [[oldTarget|alias]] / [[oldTarget#anchor]] wikilink across the vault → newTarget. Re-indexes every touched note.',
+      inputSchema: { oldTarget: z.string().min(1), newTarget: z.string().min(1) },
+    },
+    async ({ oldTarget, newTarget }) => {
+      try {
+        const r = await fsops.replaceWikilinkTarget(vaultDir, oldTarget, newTarget);
+        for (const t of r.touched) await deps.onNoteChanged?.(t.notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_restore_trashed',
+    {
+      description: 'Restore a soft-deleted note from <vault>/.trash/ back to its original path. Picks the latest trash entry. Re-indexes.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try {
+        const r = await fsops.restoreTrashed(vaultDir, notePath);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_cleanup_trash',
+    { description: 'Permanently delete every note in <vault>/.trash/. Returns counts.' },
+    async () => {
+      try { return payload(await fsops.cleanupTrash(vaultDir)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_search_in_note',
+    {
+      description: 'Semantic search restricted to chunks of one note. Useful for navigating long notes.',
+      inputSchema: { notePath: z.string(), query: z.string().min(1), k: z.number().int().positive().optional() },
+    },
+    async ({ notePath, query, k }) => {
+      const all = await index.query(query, (k ?? 5) * 4);
+      const filtered = all.filter((h) => h.notePath === notePath).slice(0, k ?? 5);
+      return payload({ notePath, query, hits: filtered });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_export_bundle',
+    {
+      description: 'Concat several notes into one markdown bundle. Each is prefaced w/ # notePath; separator between.',
+      inputSchema: {
+        notePaths: z.array(z.string()).min(1).max(200),
+        separator: z.string().optional(),
+      },
+    },
+    async ({ notePaths, separator }) => {
+      try { return payload(await fsops.exportBundle(vaultDir, notePaths, { separator })); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_tag_notes',
+    {
+      description: 'Append a #tag to the body of every named note (skips ones that already contain the exact tag). Re-indexes.',
+      inputSchema: { tag: z.string().regex(/^[A-Za-z0-9][\w/-]*$/), notePaths: z.array(z.string()).min(1).max(200) },
+    },
+    async ({ tag, notePaths }) => {
+      const touched: string[] = [];
+      const re = new RegExp(`(?:^|\\s)#${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'm');
+      for (const np of notePaths) {
+        try {
+          const { text } = await fsops.readPage(vaultDir, np);
+          if (re.test(text)) continue;
+          await fsops.appendToPage(vaultDir, np, `\n\n#${tag}\n`);
+          await deps.onNoteChanged?.(np);
+          touched.push(np);
+        } catch { /* skip missing */ }
+      }
+      return payload({ tag, tagged: touched });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_vault_doctor',
+    {
+      description: 'Vault hygiene scan: counts notes/chunks, lists orphans, broken-link count, top tag, average words. Single-call summary.',
+    },
+    async () => {
+      const notes = index.notePaths();
+      const orphans = (await import('./vault-analytics.js')).orphanNotes(index.linkMap());
+      const broken = (await import('./vault-analytics.js')).brokenLinks(index.linkMap());
+      const tags = await (await import('./vault-analytics.js')).tagCounts(vaultDir, async (abs) => (await readFile(abs)).toString('utf8'));
+      let totalWords = 0;
+      for (const np of notes.slice(0, 200)) {
+        try { totalWords += (await fsops.wordCount(vaultDir, np)).words; } catch { /* skip */ }
+      }
+      return payload({
+        notes: notes.length,
+        chunks: index.size,
+        orphans: orphans.length,
+        brokenLinks: broken.length,
+        topTag: tags[0] ?? null,
+        sampledNotes: Math.min(notes.length, 200),
+        avgWordsSampled: notes.length > 0 ? Math.round(totalWords / Math.min(notes.length, 200)) : 0,
+      });
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_grep',
     {
       description: 'Plain-text or regex search across notes w/ line numbers + optional pre/post context. Complements vaultnexus_search (semantic).',

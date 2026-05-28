@@ -292,6 +292,126 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Prepend text to the top of a note (above existing content). */
+export async function prependToPage(
+  vaultDir: string, notePath: string, text: string,
+): Promise<{ notePath: string; bytes: number; prepended: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let cur;
+  try { cur = await readFile(abs); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const add = Buffer.from(text, 'utf8');
+  const next = Buffer.concat([add, cur]);
+  await writeFile(abs, next);
+  return { notePath, bytes: next.length, prepended: add.length };
+}
+
+/** Extract every fenced code block from a note. Returns [{lang, code, startLine}]. */
+export async function extractCode(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; blocks: Array<{ lang: string; code: string; startLine: number }> }> {
+  const { text } = await readPage(vaultDir, notePath);
+  const lines = text.split(/\r?\n/);
+  const blocks: Array<{ lang: string; code: string; startLine: number }> = [];
+  let i = 0;
+  while (i < lines.length) {
+    const open = /^```(\w*)\s*$/.exec(lines[i]);
+    if (!open) { i += 1; continue; }
+    const startLine = i + 1;
+    const lang = open[1] || '';
+    const body: string[] = [];
+    i += 1;
+    while (i < lines.length && !/^```\s*$/.test(lines[i])) { body.push(lines[i]); i += 1; }
+    blocks.push({ lang, code: body.join('\n'), startLine });
+    i += 1;
+  }
+  return { notePath, blocks };
+}
+
+/** Restore a soft-deleted note from .trash → original path. Picks the latest trash entry. */
+export async function restoreTrashed(
+  vaultDir: string, originalPath: string,
+): Promise<{ notePath: string; from: string }> {
+  const trashRoot = await safeRealpath(vaultDir, safeJoin(vaultDir, '.trash'));
+  let stamps;
+  try { stamps = await readdir(trashRoot); } catch { throw new VaultFsError('no .trash', 'ENOTFOUND'); }
+  stamps.sort().reverse();
+  for (const ts of stamps) {
+    const candidate = join(trashRoot, ts, originalPath);
+    try { await stat(candidate); }
+    catch { continue; }
+    const dest = await safeRealpath(vaultDir, safeJoin(vaultDir, originalPath));
+    await mkdir(dirname(dest), { recursive: true });
+    await rename(candidate, dest);
+    return { notePath: originalPath, from: relative(vaultDir, candidate) };
+  }
+  throw new VaultFsError(`no trash entry for ${originalPath}`, 'ENOTFOUND');
+}
+
+/** Empty .trash → physically delete every trashed note. Returns count + freed bytes. */
+export async function cleanupTrash(
+  vaultDir: string,
+): Promise<{ removedEntries: number; freedBytes: number }> {
+  const trashRoot = await safeRealpath(vaultDir, safeJoin(vaultDir, '.trash'));
+  let stamps;
+  try { stamps = await readdir(trashRoot); } catch { return { removedEntries: 0, freedBytes: 0 }; }
+  let entries = 0;
+  let freed = 0;
+  const sumDir = async (d: string): Promise<void> => {
+    for (const e of await readdir(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) await sumDir(p);
+      else { entries += 1; freed += (await stat(p)).size; }
+    }
+  };
+  for (const ts of stamps) {
+    try { await sumDir(join(trashRoot, ts)); } catch { /* skip */ }
+    await rm(join(trashRoot, ts), { recursive: true, force: true });
+  }
+  return { removedEntries: entries, freedBytes: freed };
+}
+
+/** Replace every wikilink target across the vault. Renames all [[X]] / [[X|alias]] / [[X#anchor]] → [[Y...]]. */
+export async function replaceWikilinkTarget(
+  vaultDir: string, oldTarget: string, newTarget: string,
+): Promise<{ touched: Array<{ notePath: string; replacements: number }> }> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const oldEsc = oldTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Match the target inside [[...]] only, preserving any |alias or #anchor suffix.
+  const re = new RegExp(`\\[\\[${oldEsc}(?=[\\]|#])`, 'g');
+  const reExact = new RegExp(`\\[\\[${oldEsc}\\]\\]`, 'g');
+  const touched: Array<{ notePath: string; replacements: number }> = [];
+  for (const abs of files) {
+    const rel = relative(vaultDir, abs);
+    const raw = (await readFile(abs)).toString('utf8');
+    let next = raw.replace(re, `[[${newTarget}`);
+    next = next.replace(reExact, `[[${newTarget}]]`);
+    if (next !== raw) {
+      const count = (raw.match(re)?.length ?? 0) + (raw.match(reExact)?.length ?? 0);
+      await writeFile(abs, Buffer.from(next, 'utf8'));
+      touched.push({ notePath: rel, replacements: count });
+    }
+  }
+  return { touched };
+}
+
+/** Export multiple notes as one concatenated markdown bundle. */
+export async function exportBundle(
+  vaultDir: string, notePaths: string[], opts: { separator?: string } = {},
+): Promise<{ bundle: string; bytes: number; included: number }> {
+  const sep = opts.separator ?? '\n\n---\n\n';
+  const parts: string[] = [];
+  for (const np of notePaths) {
+    try {
+      const { text } = await readPage(vaultDir, np);
+      parts.push(`# ${np}\n\n${text}`);
+    } catch { /* skip missing */ }
+  }
+  const bundle = parts.join(sep);
+  return { bundle, bytes: Buffer.byteLength(bundle, 'utf8'), included: parts.length };
+}
+
 /** Parse frontmatter (between leading --- fences). Returns parsed object + body bytes start. */
 export async function getFrontmatter(
   vaultDir: string, notePath: string,
