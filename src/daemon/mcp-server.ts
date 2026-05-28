@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { health } from '../core/health.js';
 import type { VaultIndex } from './vault-index.js';
 import * as fsops from './vault-fs.js';
-import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph } from './vault-analytics.js';
+import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph, notesByTag, brokenLinks } from './vault-analytics.js';
 
 export interface McpServerDeps {
   index?: VaultIndex;
@@ -389,6 +389,98 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         if (to.toLowerCase().endsWith('.md')) await deps.onNoteChanged?.(to);
         return payload(r);
       } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_rename_heading',
+    {
+      description: 'Rename one heading inside a note by exact text match. Depth preserved.',
+      inputSchema: { notePath: z.string(), oldText: z.string(), newText: z.string() },
+    },
+    async ({ notePath, oldText, newText }) => {
+      try {
+        const r = await fsops.renameHeading(vaultDir, notePath, oldText, newText);
+        if (r.replacements > 0) await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_by_tag',
+    {
+      description: 'Notes that contain a specific #tag (case-insensitive). Returns paths.',
+      inputSchema: { tag: z.string() },
+    },
+    async ({ tag }) => {
+      const notes = await notesByTag(vaultDir, tag, async (abs) => (await readFile(abs)).toString('utf8'));
+      return payload({ tag, notes });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_broken_links',
+    { description: 'Wikilinks pointing at vault paths that do not resolve to any indexed note.' },
+    async () => payload({ broken: brokenLinks(index.linkMap()) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_search_replace_vault',
+    {
+      description: 'Apply find/replace across the entire vault. all=true replaces every occurrence per note; default = first only per note. Re-indexes every touched note.',
+      inputSchema: {
+        find: z.string(),
+        replace: z.string(),
+        all: z.boolean().optional(),
+        pathPrefix: z.string().optional(),
+      },
+    },
+    async ({ find, replace, all, pathPrefix }) => {
+      const notes = index.notePaths().filter((n) => !pathPrefix || n.startsWith(pathPrefix));
+      const touched: Array<{ notePath: string; replacements: number }> = [];
+      for (const n of notes) {
+        try {
+          const r = await fsops.replaceInPage(vaultDir, n, find, replace, { all });
+          if (r.replacements > 0) {
+            touched.push({ notePath: n, replacements: r.replacements });
+            await deps.onNoteChanged?.(n);
+          }
+        } catch (e) { /* skip notes that disappeared mid-walk */ }
+      }
+      return payload({ touched, totalNotes: touched.length, totalReplacements: touched.reduce((s, t) => s + t.replacements, 0) });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_daily_note',
+    {
+      description: 'Get or create a daily note in YYYY-MM-DD.md format. Defaults to today. Returns existing content if file exists, otherwise creates it w/ optional template.',
+      inputSchema: {
+        date: z.string().optional(),
+        folder: z.string().optional(),
+        template: z.string().optional(),
+      },
+    },
+    async ({ date, folder, template }) => {
+      const today = new Date();
+      const yyyy = today.getUTCFullYear();
+      const mm = String(today.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(today.getUTCDate()).padStart(2, '0');
+      const d = date ?? `${yyyy}-${mm}-${dd}`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return errPayload(`bad date format: ${d} (expected YYYY-MM-DD)`);
+      const notePath = (folder ? `${folder.replace(/\/$/, '')}/` : '') + `${d}.md`;
+      try {
+        // Already exists → just return it
+        const r = await fsops.readPage(vaultDir, notePath);
+        return payload({ ...r, created: false });
+      } catch {
+        // Missing → create
+        const initial = template ?? `# ${d}\n\n`;
+        const r = await fsops.createPage(vaultDir, notePath, initial);
+        await deps.onNoteChanged?.(notePath);
+        return payload({ ...r, created: true, text: initial });
+      }
     },
   );
 

@@ -80,6 +80,46 @@ export function orphanNotes(noteLinks: Map<string, string[]>): string[] {
   return allNotes.filter((p) => !inbound.has(p)).sort();
 }
 
+/** Notes that contain a specific #tag (case-insensitive). Returns relative paths. */
+export async function notesByTag(
+  vaultDir: string,
+  tag: string,
+  readSource: (abs: string) => Promise<string>,
+): Promise<string[]> {
+  const files = await walkMarkdown(vaultDir);
+  const target = tag.replace(/^#/, '').toLowerCase();
+  const out: string[] = [];
+  for (const abs of files) {
+    const src = (await readSource(abs)).toLowerCase();
+    if (src.includes(`#${target}`)) {
+      // Avoid #tag-substring collisions w/ hashtags inside #longertag — keep it strict.
+      for (const m of src.matchAll(TAG_RE)) {
+        if (m[1].toLowerCase() === target) {
+          out.push(abs.startsWith(vaultDir) ? abs.slice(vaultDir.length + 1) : abs);
+          break;
+        }
+      }
+    }
+  }
+  return out.sort();
+}
+
+/** Find wikilink targets that don't resolve to any vault note. Returns [{from, target}]. */
+export function brokenLinks(noteLinks: Map<string, string[]>): Array<{ from: string; target: string }> {
+  const allNotes = [...noteLinks.keys()];
+  const baseNames = new Set(allNotes.map((p) => p.replace(/\.md$/i, '').split('/').pop()?.toLowerCase() ?? ''));
+  const fullPaths = new Set(allNotes.map((p) => p.toLowerCase()));
+  const out: Array<{ from: string; target: string }> = [];
+  for (const [from, targets] of noteLinks) {
+    for (const t of targets) {
+      const tLower = t.toLowerCase();
+      const ok = baseNames.has(tLower) || fullPaths.has(tLower) || fullPaths.has(`${tLower}.md`);
+      if (!ok) out.push({ from, target: t });
+    }
+  }
+  return out;
+}
+
 /** Outbound + inbound wikilink summaries for a single note. */
 export function linkGraph(noteLinks: Map<string, string[]>, notePath: string): { outbound: string[]; inbound: string[] } {
   const outbound = noteLinks.get(notePath) ?? [];

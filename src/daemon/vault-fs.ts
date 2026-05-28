@@ -195,6 +195,26 @@ export async function renamePath(
   return { from, to };
 }
 
+/** Rename one heading by exact text match. Heading depth preserved. */
+export async function renameHeading(
+  vaultDir: string, notePath: string, oldText: string, newText: string,
+): Promise<{ notePath: string; replacements: number; bytes: number }> {
+  const abs = safeJoin(vaultDir, notePath);
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const lines = raw.split(/\r?\n/);
+  let count = 0;
+  const next = lines.map((line) => {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (m && m[2].trim() === oldText.trim()) { count += 1; return `${m[1]} ${newText.trim()}`; }
+    return line;
+  }).join('\n');
+  const buf = Buffer.from(next, 'utf8');
+  if (count > 0) await writeFile(abs, buf);
+  return { notePath, replacements: count, bytes: buf.length };
+}
+
 /** Copy a note to a new path. Refuses overwrite unless overwrite=true. */
 export async function copyPage(
   vaultDir: string, from: string, to: string, opts: { overwrite?: boolean } = {},
