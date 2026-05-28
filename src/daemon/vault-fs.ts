@@ -321,7 +321,8 @@ export function notesByPathPrefix(
 export async function extractImageRefs(
   vaultDir: string, notePath: string,
 ): Promise<{ notePath: string; embeds: string[]; markdown: Array<{ alt: string; src: string }> }> {
-  const { text } = await readPage(vaultDir, notePath);
+  // 500KB cap → consistent w/ tokenCount + bundle. Image refs live near top of note.
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 500_000 });
   const embeds = [...new Set(
     [...text.matchAll(/!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp|svg|bmp))(?:[|#][^\]]*)?\]\]/gi)].map((m) => m[1]),
   )];
@@ -334,7 +335,7 @@ export async function extractImageRefs(
 export async function extractExternalUrls(
   vaultDir: string, notePath: string,
 ): Promise<{ notePath: string; urls: string[] }> {
-  const { text } = await readPage(vaultDir, notePath);
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 500_000 });
   const seen = new Set<string>();
   const out: string[] = [];
   // Markdown link href OR bare URL in text.
@@ -368,7 +369,7 @@ export async function replaceFirstLine(
 export async function wordDensityPerSection(
   vaultDir: string, notePath: string,
 ): Promise<{ notePath: string; sections: Array<{ heading: string; depth: number; words: number }> }> {
-  const { text } = await readPage(vaultDir, notePath);
+  const { text } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: 500_000 });
   const lines = text.split(/\r?\n/);
   const sections: Array<{ heading: string; depth: number; words: number }> = [];
   let cur: { heading: string; depth: number; words: number } | null = { heading: '(preamble)', depth: 0, words: 0 };
