@@ -83,6 +83,41 @@ export function orphanNotes(noteLinks: Map<string, string[]>): string[] {
   return allNotes.filter((p) => !inbound.has(p)).sort();
 }
 
+/** Find note-title mentions in plain text that aren't wikilinked. Suggests upgrades. */
+export async function unlinkedMentions(
+  vaultDir: string,
+  notePaths: string[],
+  readSource: (abs: string) => Promise<string>,
+  limit: number = 200,
+): Promise<Array<{ from: string; mention: string; line: number; lineText: string }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const titles = notePaths.map((p) => p.replace(/\.md$/i, '').split('/').pop() ?? '').filter(Boolean);
+  const titlesSet = new Set(titles.map((t) => t.toLowerCase()));
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ from: string; mention: string; line: number; lineText: string }> = [];
+  for (const abs of files) {
+    const rel = abs.startsWith(vaultDir) ? abs.slice(vaultDir.length + 1) : abs;
+    const src = await readSource(abs);
+    const lines = src.split(/\r?\n/);
+    // strip [[wikilinks]] + [markdown](links) + ```code``` from each line before scan
+    for (let i = 0; i < lines.length; i += 1) {
+      const stripped = lines[i]
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/\[\[[^\]]*\]\]/g, '')
+        .replace(/\[[^\]]*\]\([^)]*\)/g, '');
+      for (const title of titles) {
+        if (title.length < 4) continue;
+        const re = new RegExp(`\\b${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (re.test(stripped)) {
+          out.push({ from: rel, mention: title, line: i + 1, lineText: lines[i].slice(0, 200) });
+          if (out.length >= limit) return out;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** Notes that contain a specific #tag (case-insensitive). Returns relative paths. */
 export async function notesByTag(
   vaultDir: string,

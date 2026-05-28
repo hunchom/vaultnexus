@@ -292,6 +292,120 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** First N lines or first N bytes of a note. Token-efficient peek. */
+export async function excerpt(
+  vaultDir: string, notePath: string, opts: { lines?: number; bytes?: number } = {},
+): Promise<{ notePath: string; text: string; bytes: number; truncated: boolean }> {
+  const { text: full, bytes } = await readPage(vaultDir, notePath, { byteStart: 0, byteEnd: opts.bytes ?? 4096 });
+  const lineCap = opts.lines ?? 50;
+  const lines = full.split(/\r?\n/);
+  const slice = lines.slice(0, lineCap).join('\n');
+  const truncated = lines.length > lineCap || full.length < bytes;
+  return { notePath, text: slice, bytes: Buffer.byteLength(slice, 'utf8'), truncated };
+}
+
+/** Pick N random note paths from the indexed set. */
+export function randomNotes(notePaths: string[], n: number = 1): string[] {
+  const a = [...notePaths];
+  // Fisher-Yates partial shuffle → unbiased random sample.
+  for (let i = 0; i < Math.min(n, a.length); i += 1) {
+    const j = i + Math.floor(Math.random() * (a.length - i));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+/** Notes modified since a unix-ms timestamp. Sorted newest first. */
+export async function notesSince(
+  vaultDir: string, sinceMs: number, limit: number = 50,
+): Promise<Array<{ notePath: string; mtimeMs: number; bytes: number }>> {
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; mtimeMs: number; bytes: number }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.mtimeMs < sinceMs) continue;
+    out.push({ notePath: relative(vaultDir, abs), mtimeMs: s.mtimeMs, bytes: s.size });
+  }
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out.slice(0, limit);
+}
+
+/** Stale notes: mtime older than ageDays. Sorted oldest first. */
+export async function staleNotes(
+  vaultDir: string, ageDays: number, limit: number = 50,
+): Promise<Array<{ notePath: string; mtimeMs: number; ageDays: number }>> {
+  const cutoff = Date.now() - ageDays * 86_400_000;
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const out: Array<{ notePath: string; mtimeMs: number; ageDays: number }> = [];
+  for (const abs of files) {
+    const s = await stat(abs).catch(() => null);
+    if (!s || s.mtimeMs >= cutoff) continue;
+    out.push({ notePath: relative(vaultDir, abs), mtimeMs: s.mtimeMs, ageDays: (Date.now() - s.mtimeMs) / 86_400_000 });
+  }
+  out.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  return out.slice(0, limit);
+}
+
+/** Per-folder note count + byte total. One level deep under the given root. */
+export async function sizeBreakdown(
+  vaultDir: string, root: string = '',
+): Promise<{ root: string; folders: Array<{ folder: string; notes: number; bytes: number }> }> {
+  const start = await safeRealpath(vaultDir, safeJoin(vaultDir, root));
+  const out: Array<{ folder: string; notes: number; bytes: number }> = [];
+  let entries;
+  try { entries = await readdir(start, { withFileTypes: true }); } catch { return { root, folders: [] }; }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue;
+    let notes = 0, bytes = 0;
+    const sub = join(start, e.name);
+    const walk = async (d: string): Promise<void> => {
+      for (const ent of await readdir(d, { withFileTypes: true })) {
+        if (ent.name.startsWith('.')) continue;
+        const p = join(d, ent.name);
+        if (ent.isDirectory()) await walk(p);
+        else if (ent.isFile() && extname(ent.name).toLowerCase() === '.md') {
+          notes += 1; bytes += (await stat(p)).size;
+        }
+      }
+    };
+    try { await walk(sub); } catch { /* skip */ }
+    out.push({ folder: e.name, notes, bytes });
+  }
+  out.sort((a, b) => b.bytes - a.bytes);
+  return { root, folders: out };
+}
+
+/** Wikilink autocomplete: notes whose path or basename starts w/ prefix. */
+export function wikilinkCompletions(notePaths: string[], prefix: string, limit: number = 20): string[] {
+  const p = prefix.toLowerCase();
+  return notePaths
+    .filter((np) => {
+      const base = np.replace(/\.md$/i, '').split('/').pop()?.toLowerCase() ?? '';
+      return np.toLowerCase().startsWith(p) || base.startsWith(p);
+    })
+    .slice(0, limit);
+}
+
+/** Replace text on a specific 1-indexed line range. */
+export async function replaceLines(
+  vaultDir: string, notePath: string, startLine: number, endLine: number, newText: string,
+): Promise<{ notePath: string; bytes: number; replacedLines: number }> {
+  if (startLine < 1 || endLine < startLine) throw new VaultFsError(`bad line range ${startLine}-${endLine}`, 'EBAD');
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const lines = raw.split(/\r?\n/);
+  if (startLine > lines.length) throw new VaultFsError(`startLine ${startLine} > ${lines.length}`, 'EBAD');
+  const replaced = Math.min(endLine, lines.length) - startLine + 1;
+  const next = [...lines.slice(0, startLine - 1), newText, ...lines.slice(Math.min(endLine, lines.length))].join('\n');
+  const buf = Buffer.from(next, 'utf8');
+  await writeFile(abs, buf);
+  return { notePath, bytes: buf.length, replacedLines: replaced };
+}
+
 /** Prepend text to the top of a note (above existing content). */
 export async function prependToPage(
   vaultDir: string, notePath: string, text: string,

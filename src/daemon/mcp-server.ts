@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { health } from '../core/health.js';
 import type { VaultIndex } from './vault-index.js';
 import * as fsops from './vault-fs.js';
-import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph, notesByTag, brokenLinks } from './vault-analytics.js';
+import { outlineFromSource, tagCounts, recentNotes, orphanNotes, linkGraph, notesByTag, brokenLinks, unlinkedMentions } from './vault-analytics.js';
 
 export interface McpServerDeps {
   index?: VaultIndex;
@@ -547,6 +547,138 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         await deps.onNoteChanged?.(notePath);
         return payload({ ...r, period, stem, created: true, text: initial });
       }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_excerpt',
+    {
+      description: 'First N lines or N bytes of a note. Token-efficient peek before a full read.',
+      inputSchema: { notePath: z.string(), lines: z.number().int().positive().max(500).optional(), bytes: z.number().int().positive().max(50_000).optional() },
+    },
+    async ({ notePath, lines, bytes }) => {
+      try { return payload(await fsops.excerpt(vaultDir, notePath, { lines, bytes })); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_random_note',
+    {
+      description: 'Pick N random note paths from the indexed set (daily-review style).',
+      inputSchema: { n: z.number().int().positive().max(50).optional() },
+    },
+    async ({ n }) => payload({ notes: fsops.randomNotes(index.notePaths(), n ?? 1) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_recent_changes',
+    {
+      description: 'Notes modified since a unix-ms timestamp. Sorted newest first.',
+      inputSchema: { sinceMs: z.number().int().nonnegative(), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ sinceMs, limit }) => {
+      try { return payload({ notes: await fsops.notesSince(vaultDir, sinceMs, limit ?? 50) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_stale_notes',
+    {
+      description: 'Notes unchanged for at least ageDays. Oldest first.',
+      inputSchema: { ageDays: z.number().positive().max(3650), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ ageDays, limit }) => {
+      try { return payload({ notes: await fsops.staleNotes(vaultDir, ageDays, limit ?? 50) }); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_size_breakdown',
+    {
+      description: 'Per-folder note count + byte total under root (one level deep).',
+      inputSchema: { root: z.string().optional() },
+    },
+    async ({ root }) => {
+      try { return payload(await fsops.sizeBreakdown(vaultDir, root ?? '')); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_wikilink_completions',
+    {
+      description: 'Autocomplete: indexed notes whose path or basename starts w/ prefix.',
+      inputSchema: { prefix: z.string().min(1), limit: z.number().int().positive().max(100).optional() },
+    },
+    async ({ prefix, limit }) => payload({ completions: fsops.wikilinkCompletions(index.notePaths(), prefix, limit ?? 20) }),
+  );
+
+  server.registerTool(
+    'vaultnexus_replace_lines',
+    {
+      description: 'Replace lines [startLine..endLine] in a note (1-indexed, inclusive). Re-indexes.',
+      inputSchema: { notePath: z.string(), startLine: z.number().int().positive(), endLine: z.number().int().positive(), newText: z.string() },
+    },
+    async ({ notePath, startLine, endLine, newText }) => {
+      try {
+        const r = await fsops.replaceLines(vaultDir, notePath, startLine, endLine, newText);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_unlinked_mentions',
+    {
+      description: 'Plain-text mentions of indexed note titles that are NOT wikilinked. Suggests link upgrades.',
+      inputSchema: { limit: z.number().int().positive().max(1000).optional() },
+    },
+    async ({ limit }) => {
+      try {
+        const out = await unlinkedMentions(vaultDir, index.notePaths(), async (abs) => (await readFile(abs)).toString('utf8'), limit ?? 200);
+        return payload({ mentions: out });
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_find_long_notes',
+    {
+      description: 'Notes whose word count exceeds minWords. Sorted longest first.',
+      inputSchema: { minWords: z.number().int().nonnegative().optional(), limit: z.number().int().positive().max(500).optional() },
+    },
+    async ({ minWords, limit }) => {
+      const cutoff = minWords ?? 1000;
+      const cap = limit ?? 50;
+      const out: Array<{ notePath: string; words: number }> = [];
+      for (const np of index.notePaths()) {
+        try {
+          const wc = await fsops.wordCount(vaultDir, np);
+          if (wc.words >= cutoff) out.push({ notePath: np, words: wc.words });
+        } catch { /* skip */ }
+      }
+      out.sort((a, b) => b.words - a.words);
+      return payload({ notes: out.slice(0, cap) });
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_dedupe_candidates',
+    {
+      description: 'Near-duplicate chunk pairs across notes via cosine similarity > minSimilarity. Powered by the bridges algorithm but tuned for dedup (high similarity, no community filter).',
+      inputSchema: { minSimilarity: z.number().min(0.5).max(1).optional(), topN: z.number().int().positive().max(200).optional() },
+    },
+    async ({ minSimilarity, topN }) => {
+      const pairs = index.bridges(topN ?? 50, minSimilarity ?? 0.92, false);
+      const out = pairs.map((b) => ({
+        a: b.a.notePath, b: b.b.notePath, similarity: b.similarity,
+        aText: b.a.text.slice(0, 200), bText: b.b.text.slice(0, 200),
+      }));
+      return payload({ duplicates: out });
     },
   );
 
