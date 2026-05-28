@@ -551,6 +551,138 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   );
 
   server.registerTool(
+    'vaultnexus_grep',
+    {
+      description: 'Plain-text or regex search across notes w/ line numbers + optional pre/post context. Complements vaultnexus_search (semantic).',
+      inputSchema: {
+        pattern: z.string().min(1),
+        regex: z.boolean().optional(),
+        ignoreCase: z.boolean().optional(),
+        context: z.number().int().nonnegative().max(5).optional(),
+        pathPrefix: z.string().optional(),
+        maxHits: z.number().int().positive().max(1000).optional(),
+      },
+    },
+    async (args) => {
+      try { return payload(await fsops.grepVault(vaultDir, args.pattern, args)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_word_count',
+    {
+      description: 'Word / character / line / byte count for a note.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.wordCount(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_list_attachments',
+    {
+      description: 'Recursively list non-markdown files (images, PDFs, etc.) under a vault folder. Path + bytes + extension.',
+      inputSchema: { folderPath: z.string().optional() },
+    },
+    async ({ folderPath }) => {
+      try { return payload(await fsops.listAttachments(vaultDir, folderPath ?? '')); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_get_frontmatter',
+    {
+      description: 'Parse + return the leading YAML frontmatter as JSON.',
+      inputSchema: { notePath: z.string() },
+    },
+    async ({ notePath }) => {
+      try { return payload(await fsops.getFrontmatter(vaultDir, notePath)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_set_frontmatter',
+    {
+      description: 'Replace (or insert) the leading YAML frontmatter block. Preserves the body. Re-indexes the note.',
+      inputSchema: { notePath: z.string(), frontmatter: z.record(z.string(), z.any()) },
+    },
+    async ({ notePath, frontmatter }) => {
+      try {
+        const r = await fsops.setFrontmatter(vaultDir, notePath, frontmatter as Record<string, unknown>);
+        await deps.onNoteChanged?.(notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_append_to_periodic',
+    {
+      description: 'Append text to a periodic note (daily/weekly/monthly/yearly). Creates the note if missing. Re-indexes.',
+      inputSchema: {
+        period: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+        text: z.string(),
+        date: z.string().optional(),
+        folder: z.string().optional(),
+        template: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const r = await fsops.appendToPeriodic(vaultDir, args.period, args.text, args);
+        await deps.onNoteChanged?.(r.notePath);
+        return payload(r);
+      } catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_diff_notes',
+    {
+      description: 'Line-level diff between two notes. Token-efficient — caps at 200 changed lines each side.',
+      inputSchema: { a: z.string(), b: z.string() },
+    },
+    async ({ a, b }) => {
+      try { return payload(await fsops.diffNotes(vaultDir, a, b)); }
+      catch (e) { return errPayload((e as Error).message); }
+    },
+  );
+
+  server.registerTool(
+    'vaultnexus_query_frontmatter',
+    {
+      description: 'Find notes whose frontmatter satisfies key=value filters (string equality, or `_in` for membership). Lightweight Dataview substitute.',
+      inputSchema: {
+        filter: z.record(z.string(), z.any()),
+        limit: z.number().int().positive().max(500).optional(),
+      },
+    },
+    async ({ filter, limit }) => {
+      const matches: Array<{ notePath: string; frontmatter: Record<string, unknown> }> = [];
+      const want = limit ?? 100;
+      for (const np of index.notePaths()) {
+        try {
+          const { frontmatter } = await fsops.getFrontmatter(vaultDir, np);
+          let ok = true;
+          for (const [k, want] of Object.entries(filter ?? {})) {
+            const got = frontmatter[k];
+            if (Array.isArray(want)) { if (!want.includes(got as never)) { ok = false; break; } }
+            else if (got !== want) { ok = false; break; }
+          }
+          if (ok) matches.push({ notePath: np, frontmatter });
+          if (matches.length >= want) break;
+        } catch { /* skip un-readable */ }
+      }
+      return payload({ matches });
+    },
+  );
+
+  server.registerTool(
     'vaultnexus_list_bookmarks',
     {
       description: 'Read .obsidian/bookmarks.json → flat list of bookmarked notes + headings. Empty when no bookmarks file.',

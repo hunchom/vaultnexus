@@ -292,6 +292,187 @@ export async function patchHeadingSection(
   return { notePath, bytes: buf.length, replacedLines: endLine - startLine - 1 };
 }
 
+/** Parse frontmatter (between leading --- fences). Returns parsed object + body bytes start. */
+export async function getFrontmatter(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; frontmatter: Record<string, unknown>; bodyByteOffset: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const m = /^---\n([\s\S]*?)\n---(\n|$)/.exec(raw);
+  if (!m) return { notePath, frontmatter: {}, bodyByteOffset: 0 };
+  // Minimal YAML: key: value (string|number|bool|list), no nested objects. Power users use proper YAML libs.
+  const fm: Record<string, unknown> = {};
+  for (const line of m[1].split('\n')) {
+    const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*?)\s*$/.exec(line);
+    if (!kv) continue;
+    const k = kv[1]; const v = kv[2];
+    if (v === '') fm[k] = '';
+    else if (v === 'true') fm[k] = true;
+    else if (v === 'false') fm[k] = false;
+    else if (v === 'null' || v === '~') fm[k] = null;
+    else if (/^-?\d+(\.\d+)?$/.test(v)) fm[k] = Number(v);
+    else if (/^\[.*\]$/.test(v)) fm[k] = v.slice(1, -1).split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+    else fm[k] = v.replace(/^["']|["']$/g, '');
+  }
+  return { notePath, frontmatter: fm, bodyByteOffset: Buffer.byteLength(m[0], 'utf8') };
+}
+
+/** Write frontmatter back. Replaces existing --- block or prepends a new one. */
+export async function setFrontmatter(
+  vaultDir: string, notePath: string, frontmatter: Record<string, unknown>,
+): Promise<{ notePath: string; bytes: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let raw;
+  try { raw = (await readFile(abs)).toString('utf8'); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const serialize = (v: unknown): string => {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'boolean' || typeof v === 'number') return String(v);
+    if (Array.isArray(v)) return `[${v.map((x) => serialize(x)).join(', ')}]`;
+    return /^[\w\s.,/:-]+$/.test(String(v)) ? String(v) : JSON.stringify(String(v));
+  };
+  const lines = Object.entries(frontmatter).map(([k, v]) => `${k}: ${serialize(v)}`);
+  const block = `---\n${lines.join('\n')}\n---\n`;
+  const body = raw.startsWith('---') ? raw.replace(/^---\n[\s\S]*?\n---\n?/, '') : raw;
+  const next = block + body;
+  const buf = Buffer.from(next, 'utf8');
+  await writeFile(abs, buf);
+  return { notePath, bytes: buf.length };
+}
+
+/** List non-markdown files (attachments) under the vault. Recursive. Returns relative paths + sizes. */
+export async function listAttachments(
+  vaultDir: string, folderPath: string = '',
+): Promise<{ folderPath: string; attachments: Array<{ path: string; bytes: number; ext: string }> }> {
+  const root = await safeRealpath(vaultDir, safeJoin(vaultDir, folderPath));
+  const out: Array<{ path: string; bytes: number; ext: string }> = [];
+  const walk = async (d: string): Promise<void> => {
+    let entries;
+    try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) {
+        const ext = extname(e.name).toLowerCase();
+        if (ext === '.md') continue;
+        const s = await stat(p);
+        out.push({ path: relative(vaultDir, p), bytes: s.size, ext });
+      }
+    }
+  };
+  await walk(root);
+  out.sort((a, b) => a.path.localeCompare(b.path));
+  return { folderPath, attachments: out };
+}
+
+/** Plain-text grep across the vault. Optional regex. Returns line hits w/ pre/post context. */
+export async function grepVault(
+  vaultDir: string,
+  pattern: string,
+  opts: { regex?: boolean; ignoreCase?: boolean; context?: number; pathPrefix?: string; maxHits?: number } = {},
+): Promise<{ pattern: string; hits: Array<{ notePath: string; line: number; text: string; before: string[]; after: string[] }> }> {
+  const ctx = Math.max(0, Math.min(opts.context ?? 0, 5));
+  const cap = opts.maxHits ?? 200;
+  const flags = `g${opts.ignoreCase ? 'i' : ''}`;
+  const re = opts.regex
+    ? new RegExp(pattern, flags)
+    : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  const { walkMarkdown } = await import('./indexer.js');
+  const files = await walkMarkdown(vaultDir);
+  const hits: Array<{ notePath: string; line: number; text: string; before: string[]; after: string[] }> = [];
+  for (const abs of files) {
+    const rel = relative(vaultDir, abs);
+    if (opts.pathPrefix && !rel.startsWith(opts.pathPrefix)) continue;
+    const lines = (await readFile(abs)).toString('utf8').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!re.test(lines[i])) continue;
+      re.lastIndex = 0;
+      hits.push({
+        notePath: rel,
+        line: i + 1,
+        text: lines[i],
+        before: lines.slice(Math.max(0, i - ctx), i),
+        after: lines.slice(i + 1, i + 1 + ctx),
+      });
+      if (hits.length >= cap) return { pattern, hits };
+    }
+  }
+  return { pattern, hits };
+}
+
+/** Word + character count for a note. Whitespace-token approx. */
+export async function wordCount(
+  vaultDir: string, notePath: string,
+): Promise<{ notePath: string; words: number; chars: number; lines: number; bytes: number }> {
+  const abs = await safeRealpath(vaultDir, safeJoin(vaultDir, notePath));
+  let buf;
+  try { buf = await readFile(abs); }
+  catch { throw new VaultFsError(`note not found: ${notePath}`, 'ENOTFOUND'); }
+  const text = buf.toString('utf8');
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const chars = [...text].length;
+  const lines = text.split(/\r?\n/).length;
+  return { notePath, words, chars, lines, bytes: buf.length };
+}
+
+/** Append text to the periodic note for the given period (defaults: daily, today). */
+export async function appendToPeriodic(
+  vaultDir: string,
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly',
+  text: string,
+  opts: { date?: string; folder?: string; template?: string } = {},
+): Promise<{ notePath: string; bytes: number; appended: number; created: boolean }> {
+  const d = opts.date ? new Date(opts.date) : new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const weekOf = (dt: Date): string => {
+    const t = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+    const day = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - day + 3);
+    const jan4 = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const week = 1 + Math.round(((t.getTime() - jan4.getTime()) / 86_400_000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+    return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+  };
+  const stem = period === 'daily' ? `${yyyy}-${mm}-${dd}`
+    : period === 'weekly' ? weekOf(d)
+    : period === 'monthly' ? `${yyyy}-${mm}`
+    : `${yyyy}`;
+  const notePath = (opts.folder ? `${opts.folder.replace(/\/$/, '')}/` : '') + `${stem}.md`;
+  let created = false;
+  try { await readPage(vaultDir, notePath); }
+  catch {
+    await createPage(vaultDir, notePath, opts.template ?? `# ${stem}\n\n`);
+    created = true;
+  }
+  const r = await appendToPage(vaultDir, notePath, text);
+  return { ...r, created };
+}
+
+/** Diff two notes (line-based unified). Caps at 200 lines either side → token-efficient. */
+export async function diffNotes(
+  vaultDir: string, a: string, b: string,
+): Promise<{ a: string; b: string; same: boolean; addedLines: number; removedLines: number; diff: string }> {
+  const ra = (await readPage(vaultDir, a)).text;
+  const rb = (await readPage(vaultDir, b)).text;
+  if (ra === rb) return { a, b, same: true, addedLines: 0, removedLines: 0, diff: '' };
+  const la = ra.split(/\r?\n/);
+  const lb = rb.split(/\r?\n/);
+  // O(N+M) line set diff — keeps it cheap. Exact tokens preserved as-is.
+  const setA = new Set(la);
+  const removed = la.filter((line) => !lb.includes(line));
+  const added = lb.filter((line) => !setA.has(line));
+  const cap = 200;
+  const out = [
+    ...removed.slice(0, cap).map((l) => `- ${l}`),
+    ...added.slice(0, cap).map((l) => `+ ${l}`),
+  ].join('\n');
+  return { a, b, same: false, addedLines: added.length, removedLines: removed.length, diff: out };
+}
+
 /** Rename one heading by exact text match. Heading depth preserved. */
 export async function renameHeading(
   vaultDir: string, notePath: string, oldText: string, newText: string,

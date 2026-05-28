@@ -78,6 +78,12 @@ export function createHttpApp(deps: HttpAppDeps = {}): Hono {
         'vaultnexus_find_by_tag','vaultnexus_broken_links',
         'vaultnexus_get_partial','vaultnexus_patch_section',
         'vaultnexus_daily_note','vaultnexus_periodic_note','vaultnexus_fetch_url',
+        // grep + analytics
+        'vaultnexus_grep','vaultnexus_word_count','vaultnexus_list_attachments','vaultnexus_diff_notes',
+        // frontmatter
+        'vaultnexus_get_frontmatter','vaultnexus_set_frontmatter','vaultnexus_query_frontmatter',
+        // periodic convenience
+        'vaultnexus_append_to_periodic',
         // obsidian-adjacent
         'vaultnexus_list_bookmarks','vaultnexus_execute_template',
       ],
