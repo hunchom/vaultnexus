@@ -669,7 +669,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     'vaultnexus_reindex_note',
     {
       description: 'Force re-chunk + re-embed one note. Use after external edits that fs.watch may have missed.',
-      inputSchema: { notePath: z.string() },
+      inputSchema: { notePath: z.string().min(1).endsWith('.md') },
     },
     async ({ notePath }) => {
       try { await deps.onNoteChanged?.(notePath); return payload({ notePath, reindexed: true }); }

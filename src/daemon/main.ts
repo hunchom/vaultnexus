@@ -95,12 +95,16 @@ async function main(): Promise<void> {
     recentSelfWrites.set(notePath, Date.now() + 1500);
   };
 
-  // Per-path serialization → concurrent reindex requests queue, not interleave (Fix: review finding #8).
+  // Per-path serialization → concurrent reindex requests queue, not interleave.
+  // .finally cleanup → no permanent growth across distinct paths (Fix: review MEDIUM #1 latest round).
   const reindexLocks = new Map<string, Promise<void>>();
   const serialize = async (notePath: string, fn: () => Promise<void>): Promise<void> => {
     const prior = reindexLocks.get(notePath) ?? Promise.resolve();
-    const next = prior.then(fn, fn);
-    reindexLocks.set(notePath, next.catch(() => undefined));
+    const next = prior.then(fn, fn).catch(() => undefined);
+    const settled = next.finally(() => {
+      if (reindexLocks.get(notePath) === settled) reindexLocks.delete(notePath);
+    });
+    reindexLocks.set(notePath, settled);
     await next;
   };
 
